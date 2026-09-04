@@ -20,6 +20,18 @@
   }
 }
 
+/* Touch devices only: the ledger grid depends on dense rows, so this lifts
+   controls to the 44px minimum tap target where it actually matters rather
+   than padding everything out on desktop. */
+@media (pointer: coarse) {
+  .input,
+  .btn-gold,
+  .btn-ghost,
+  button[type="submit"] {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
