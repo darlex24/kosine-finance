@@ -30,11 +30,34 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`${res.status} ${detail}`);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...init, headers });
+  } catch {
+    // fetch only rejects on a network-level failure — the API being down, or a
+    // response the browser blocked. Say which, rather than "Failed to fetch".
+    throw new Error(
+      `Could not reach the Kosine API at ${BASE}. Check that the backend is running.`,
+    );
   }
+
+  if (!res.ok) {
+    // FastAPI puts the human-readable reason in `detail`; show that, not raw JSON.
+    const body = await res.text();
+    let message = body;
+    try {
+      const parsed = JSON.parse(body);
+      const detail = parsed?.detail;
+      if (typeof detail === "string") message = detail;
+      else if (Array.isArray(detail)) {
+        message = detail.map((d) => d?.msg ?? JSON.stringify(d)).join("; ");
+      }
+    } catch {
+      /* Not JSON — fall back to the raw body. */
+    }
+    throw new Error(message || `Request failed (${res.status})`);
+  }
+
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
@@ -138,8 +161,8 @@ export const api = {
   cashFlow: (year?: number) => request<CashFlowPoint[]>(`/api/cashflow${qs({ year })}`),
   years: () => request<number[]>("/api/years"),
   annualSummary: () => request<AnnualSummary[]>("/api/annual-summary"),
-  categorySpend: (year?: number) =>
-    request<CategorySpend[]>(`/api/spend-by-category${qs({ year })}`),
+  categorySpend: (year?: number, month?: number, entry_type?: string) =>
+    request<CategorySpend[]>(`/api/spend-by-category${qs({ year, month, entry_type })}`),
 
   // ------------------------------------------------------- accounts, giving
   accounts: () => request<Account[]>("/api/accounts"),

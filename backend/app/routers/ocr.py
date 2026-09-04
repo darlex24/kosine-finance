@@ -6,6 +6,13 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AuthenticationError,
+    RateLimitError,
+)
 from pydantic import ValidationError
 from supabase import Client
 
@@ -43,7 +50,48 @@ async def scan_document(
     if not settings.openai_api_key:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "OCR is not configured")
 
-    return await ocr_service.extract(content, file.content_type, settings)
+    # Anything raised past here would become an unhandled 500, and Starlette's
+    # error handler sits OUTSIDE CORSMiddleware — so the response reaches the
+    # browser without CORS headers and the caller sees a bare "Failed to fetch"
+    # instead of the reason. Every failure below is turned into a real response.
+    try:
+        return await ocr_service.extract(content, file.content_type, settings)
+    except AuthenticationError as exc:
+        logger.error("OpenAI rejected the API key: %s", exc)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "The OpenAI API key was rejected. Check OPENAI_API_KEY in backend/.env.",
+        ) from exc
+    except RateLimitError as exc:
+        detail = str(exc)
+        if "insufficient_quota" in detail or "credit" in detail.lower():
+            message = (
+                "The OpenAI account has no credits remaining, so the receipt "
+                "could not be read. Add credits, then scan again — or enter the "
+                "entry by hand in the ledger."
+            )
+        else:
+            message = "OpenAI is rate limiting requests. Wait a moment and scan again."
+        logger.error("OpenAI rate limit / quota: %s", exc)
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, message) from exc
+    except APITimeoutError as exc:
+        logger.error("OpenAI timed out: %s", exc)
+        raise HTTPException(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "Reading the document timed out. Try a smaller or clearer image.",
+        ) from exc
+    except (APIConnectionError, APIError) as exc:
+        logger.error("OpenAI call failed: %s", exc)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Could not reach the OCR service: {exc}"
+        ) from exc
+    except (ValueError, KeyError, TypeError) as exc:
+        # Malformed JSON back from the model, or a shape we did not expect.
+        logger.error("Could not parse the OCR response: %s", exc)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "The document was read but could not be understood. Try a clearer image.",
+        ) from exc
 
 
 @router.post("/ocr/upload")

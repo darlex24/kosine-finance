@@ -181,7 +181,15 @@ export default function Dashboard() {
         </Card>
 
         <Card>
-          <SectionHeading title="Where it goes" hint={`Top categories, ${year}`} />
+          <SectionHeading
+            title="Where it goes"
+            hint={`Top categories, ${year}`}
+            action={
+              <Link href="/expenses" className="text-xs text-gold-300 hover:underline">
+                Full breakdown →
+              </Link>
+            }
+          />
           <ul className="space-y-2.5">
             {spend.slice(0, 8).map((item) => (
               <li key={`${item.category_group}-${item.category_name}`} className="text-sm">

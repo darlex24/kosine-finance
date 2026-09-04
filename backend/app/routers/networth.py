@@ -107,13 +107,22 @@ def get_cash_flow(year: int | None = None, user: CurrentUser = Depends(get_curre
 
 
 @router.get("/spend-by-category", response_model=list[CategorySpend])
-def get_category_spend(year: int | None = None, user: CurrentUser = Depends(get_current_user)):
-    query = user.client.table("v_category_spend").select(
-        "category_group, category_name, total"
-    )
+def get_category_spend(
+    year: int | None = None,
+    month: int | None = None,
+    entry_type: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Spending rolled up by category. Expenses and giving only — savings and
+    investment are money moving into your own pocket, not money going out."""
+    query = user.client.table("v_category_spend").select("*")
     if year:
         query = query.eq("year", year)
-    return _rows(query.order("total", desc=True).limit(50).execute())
+    if month:
+        query = query.eq("month", month)
+    if entry_type:
+        query = query.eq("entry_type", entry_type)
+    return _rows(query.order("total", desc=True).limit(500).execute())
 
 
 @router.get("/years", response_model=list[int])

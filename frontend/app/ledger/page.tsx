@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
 
 import { useCatalog } from "@/components/CatalogProvider";
 import { LedgerFilterBar } from "@/components/ledger/LedgerFilterBar";
@@ -14,8 +15,31 @@ import { useLedger } from "@/lib/useLedger";
 import type { LedgerFilters, LedgerRow } from "@/lib/types";
 
 export default function LedgerPage() {
+  // useSearchParams needs a Suspense boundary in the App Router.
+  return (
+    <Suspense fallback={<p className="text-sm text-navy-300">Loading the ledger…</p>}>
+      <Ledger />
+    </Suspense>
+  );
+}
+
+function Ledger() {
   const { baseCurrency, ready } = useCatalog();
-  const [filters, setFilters] = useState<LedgerFilters>({});
+  const params = useSearchParams();
+
+  // Seed from the URL so the expenses page can drill straight into a category.
+  const [filters, setFilters] = useState<LedgerFilters>(() => {
+    const seed: LedgerFilters = {};
+    for (const key of [
+      "category_id", "platform_id", "account_id", "currency", "q", "date_from", "date_to",
+    ] as const) {
+      const value = params.get(key);
+      if (value) seed[key] = value;
+    }
+    const entryType = params.get("entry_type");
+    if (entryType) seed.entry_type = entryType as LedgerFilters["entry_type"];
+    return seed;
+  });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openRow, setOpenRow] = useState<LedgerRow | null>(null);
   const toast = useToast();

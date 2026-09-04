@@ -243,6 +243,13 @@ export type CategorySpend = {
   category_group: string;
   category_name: string;
   total: number;
+  category_id: string | null;
+  category_icon: string | null;
+  entry_type: LedgerEntryType | null;
+  year: number | null;
+  month: number | null;
+  entry_count: number;
+  base_currency: string | null;
 };
 
 export type Budget = {

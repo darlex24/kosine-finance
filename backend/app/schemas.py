@@ -487,6 +487,13 @@ class CategorySpend(BaseModel):
     category_group: str
     category_name: str
     total: Decimal
+    category_id: str | None = None
+    category_icon: str | None = None
+    entry_type: LedgerEntryType | None = None
+    year: int | None = None
+    month: int | None = None
+    entry_count: int = 0
+    base_currency: str | None = None
 
 
 class FxRefreshOut(BaseModel):

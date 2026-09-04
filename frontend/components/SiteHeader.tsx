@@ -11,6 +11,7 @@ import { cx } from "./ui";
 const NAV = [
   { href: "/", label: "Dashboard" },
   { href: "/ledger", label: "Ledger" },
+  { href: "/expenses", label: "Expenses" },
   { href: "/assets", label: "Assets" },
   { href: "/giving", label: "Giving" },
   { href: "/budget", label: "Budget" },
