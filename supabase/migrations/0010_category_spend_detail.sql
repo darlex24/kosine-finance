@@ -5,7 +5,13 @@
 -- drill through to the ledger on, no month to narrow by, and no count to say
 -- whether a total is one large payment or forty small ones.
 
-create or replace view public.v_category_spend
+-- Dropped rather than replaced: CREATE OR REPLACE VIEW can only append columns,
+-- and this inserts month, entry_type and category_id ahead of category_group,
+-- which Postgres rejects as renaming an existing column. Nothing depends on
+-- this view, so dropping it costs nothing.
+drop view if exists public.v_category_spend;
+
+create view public.v_category_spend
 with (security_invoker = true) as
 select
   t.user_id,
