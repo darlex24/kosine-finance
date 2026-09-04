@@ -13,6 +13,7 @@ from ..schemas import (
     TransactionIn,
     TransactionOut,
 )
+from .ledger import _price_row
 
 router = APIRouter()
 
@@ -97,7 +98,11 @@ def list_transactions(
 def create_transaction(
     payload: TransactionIn, user: CurrentUser = Depends(get_current_user)
 ):
+    """Legacy single-transaction insert. New clients should use POST /api/ledger,
+    which also resolves the category and keeps giving records in step."""
     body = payload.model_dump(mode="json") | {"user_id": user.id}
+    # base_amount / base_currency / fx_rate are NOT NULL from migration 0003.
+    body = _price_row(user, body, payload.date)
     return _one(user.client.table("transactions").insert(body).execute(), "Transaction")
 
 

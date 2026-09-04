@@ -4,61 +4,194 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useCatalog } from "@/components/CatalogProvider";
+import { CashFlowChart, Sparkline } from "@/components/dashboard/charts";
 import { DisclosureCard } from "@/components/DisclosureCard";
-import { ReceiptScanner } from "@/components/ReceiptScanner";
+import { CanadaModule } from "@/components/regions/CanadaModule";
+import { Button, Card, SectionHeading, Skeleton, StatTile } from "@/components/ui";
 import { api, type GivingSummary } from "@/lib/api";
-import { GIVING_ARMS, REALM_LABELS, REALM_ORDER, cad, type Realm } from "@/lib/givingArms";
+import { GIVING_ARMS, REALM_LABELS, REALM_ORDER, type Realm } from "@/lib/givingArms";
+import { formatAbs, formatMoney, formatPercent } from "@/lib/money";
+import type { CashFlowPoint, CategorySpend, LedgerRow, NetWorth } from "@/lib/types";
 
 const TAX_YEAR = 2026;
-const LIMITS = { tfsa: 7000, rrsp: 33810, fhsa: 8000 };
 
 export default function Dashboard() {
+  const { profile, baseCurrency, ready } = useCatalog();
+  const [netWorth, setNetWorth] = useState<NetWorth | null>(null);
+  const [cashFlow, setCashFlow] = useState<CashFlowPoint[]>([]);
+  const [spend, setSpend] = useState<CategorySpend[]>([]);
+  const [recent, setRecent] = useState<LedgerRow[]>([]);
   const [summary, setSummary] = useState<GivingSummary | null>(null);
-  const [accounts, setAccounts] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [snapshotting, setSnapshotting] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.givingSummary(TAX_YEAR), api.accounts()])
-      .then(([s, a]) => {
-        setSummary(s);
-        setAccounts(a);
+    if (!ready) return;
+    Promise.all([
+      api.netWorth(),
+      api.cashFlow(TAX_YEAR),
+      api.categorySpend(TAX_YEAR),
+      api.ledger({ limit: 8 }),
+      api.givingSummary(TAX_YEAR),
+    ])
+      .then(([nw, flow, categories, ledger, giving]) => {
+        setNetWorth(nw);
+        setCashFlow(flow);
+        setSpend(categories);
+        setRecent(ledger.rows);
+        setSummary(giving);
       })
-      .catch((err) => setError(err.message));
-  }, []);
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Could not load your dashboard"),
+      );
+  }, [ready]);
 
-  const netWorth = accounts.reduce((sum, a) => sum + Number(a.balance ?? 0), 0);
+  const money = (value: number | null | undefined, whole = true) =>
+    formatMoney(value ?? 0, netWorth?.base_currency ?? baseCurrency, { whole });
+
   const armName = (arm: string) =>
     GIVING_ARMS.find((a) => a.arm === arm)?.display_name ?? arm;
 
+  async function snapshot() {
+    setSnapshotting(true);
+    try {
+      await api.snapshotNetWorth();
+      setNetWorth(await api.netWorth());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the snapshot");
+    } finally {
+      setSnapshotting(false);
+    }
+  }
+
   return (
-    <div className="space-y-8">
-      <motion.div
+    <div className="space-y-10">
+      <motion.header
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
+        transition={{ duration: 0.2 }}
       >
         <h1 className="text-2xl font-semibold tracking-tight">
           Your stewardship, <span className="gold-text">{TAX_YEAR}</span>
         </h1>
         <p className="mt-1 text-sm text-navy-300">
-          Ontario · everything else is one tap away.
+          {profile?.full_name ? `${profile.full_name} · ` : ""}
+          Everything you hold, everything you give — in {baseCurrency}.
         </p>
-      </motion.div>
+      </motion.header>
 
       {error && (
-        <p className="card text-sm text-red-300">
-          Could not load your data — {error}. Sign in and confirm the API is running.
-        </p>
+        <Card className="border-red-400/20 text-sm text-red-300">
+          Could not load your data — {error}. Confirm the API is running and the V2
+          migrations have been applied.
+        </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* ------------------------------------------------------ net worth */}
+      <section className="grid gap-4 lg:grid-cols-3">
+        <Card accent className="lg:col-span-1">
+          <p className="label">Net worth</p>
+          {netWorth ? (
+            <>
+              <p className="figure mt-1 gold-text">{money(netWorth.net_worth)}</p>
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                {netWorth.change_amount != null ? (
+                  <span
+                    className={
+                      netWorth.change_amount >= 0 ? "text-emerald-300" : "text-red-300"
+                    }
+                  >
+                    {formatMoney(netWorth.change_amount, netWorth.base_currency, {
+                      whole: true,
+                      signed: true,
+                    })}{" "}
+                    {formatPercent(netWorth.change_pct)}
+                  </span>
+                ) : (
+                  <span className="text-navy-300">No earlier snapshot yet</span>
+                )}
+                <span className="text-navy-300">since last snapshot</span>
+              </div>
+              <Sparkline points={netWorth.trend} className="mt-4" />
+              <div className="mt-4 flex items-center justify-between">
+                <Link href="/assets" className="text-xs text-gold-300 hover:underline">
+                  Manage assets &amp; liabilities →
+                </Link>
+                <Button variant="quiet" onClick={() => void snapshot()} disabled={snapshotting}>
+                  {snapshotting ? "Saving…" : "Snapshot today"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Skeleton className="mt-3 h-24" />
+          )}
+        </Card>
+
+        <div className="grid gap-4 sm:grid-cols-3 lg:col-span-2">
+          <StatTile
+            label="Assets"
+            value={money(netWorth?.total_assets)}
+            hint="Holdings + account balances"
+          />
+          <StatTile
+            label="Liabilities"
+            value={money(netWorth?.total_liabilities)}
+            hint="Loans + card balances"
+          />
+          <StatTile
+            label="Liquid cash"
+            value={money(netWorth?.liquid_cash)}
+            hint="Available today"
+          />
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------ cash flow */}
+      <section className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <SectionHeading
+            title="Cash flow"
+            hint={`Monthly, ${TAX_YEAR} — giving shown as its own outflow`}
+          />
+          <CashFlowChart points={cashFlow} currency={baseCurrency} />
+        </Card>
+
+        <Card>
+          <SectionHeading title="Where it goes" hint={`Top categories, ${TAX_YEAR}`} />
+          <ul className="space-y-2.5">
+            {spend.slice(0, 8).map((item) => (
+              <li key={`${item.category_group}-${item.category_name}`} className="text-sm">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-navy-100">{item.category_name}</span>
+                  <span className="tabular-nums text-navy-50">{money(item.total)}</span>
+                </div>
+                <div className="mt-1 h-1 rounded-full bg-white/5">
+                  <div
+                    className="h-1 rounded-full bg-gold-500/70"
+                    style={{
+                      width: `${Math.min(100, (item.total / (spend[0]?.total || 1)) * 100)}%`,
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+            {spend.length === 0 && (
+              <li className="text-sm text-navy-300">Nothing categorised yet this year.</li>
+            )}
+          </ul>
+        </Card>
+      </section>
+
+      {/* --------------------------------------------------------- giving */}
+      <section className="grid gap-4 md:grid-cols-3">
         <DisclosureCard
           label="Given this year"
-          value={cad(summary?.total_given ?? 0)}
+          value={money(summary?.total_given ?? 0)}
           accent
           hint={
             summary
-              ? `${cad(summary.receiptable_total)} receiptable · ${cad(
+              ? `${money(summary.receiptable_total)} receiptable · ${money(
                   summary.non_receiptable_total,
                 )} personal`
               : "—"
@@ -68,75 +201,16 @@ export default function Dashboard() {
             {REALM_ORDER.map((realm) => (
               <li key={realm} className="flex justify-between text-navy-100">
                 <span>{REALM_LABELS[realm as Realm]}</span>
-                <span className="tabular-nums">
-                  {cad(summary?.by_realm?.[realm] ?? 0)}
-                </span>
+                <span className="tabular-nums">{money(summary?.by_realm?.[realm] ?? 0)}</span>
               </li>
             ))}
           </ul>
-          <Link
-            href="/giving"
-            className="mt-4 inline-block text-xs text-gold-300 hover:underline"
-          >
+          <Link href="/giving" className="mt-4 inline-block text-xs text-gold-300 hover:underline">
             Open the Giving Engine →
           </Link>
         </DisclosureCard>
 
-        <DisclosureCard
-          label="Est. donation credit"
-          value={cad(summary?.estimated_federal_credit ?? 0)}
-          hint="Federal, 15% / 29% split"
-        >
-          <p className="text-navy-300">
-            Calculated on {cad(summary?.receiptable_total ?? 0)} of receiptable giving.
-            Honorariums, love offerings and direct alms are excluded — CRA does not
-            allow a receipt for a gift to an individual.
-          </p>
-        </DisclosureCard>
-
-        <DisclosureCard
-          label="Net worth"
-          value={cad(netWorth)}
-          hint={`${accounts.length} account${accounts.length === 1 ? "" : "s"}`}
-        >
-          <ul className="space-y-2">
-            {accounts.map((account) => (
-              <li key={account.id} className="flex justify-between text-navy-100">
-                <span>
-                  {account.name}
-                  <span className="ml-2 text-xs uppercase text-navy-300">
-                    {account.type}
-                  </span>
-                </span>
-                <span className="tabular-nums">{cad(Number(account.balance))}</span>
-              </li>
-            ))}
-            {accounts.length === 0 && (
-              <li className="text-navy-300">No accounts linked yet.</li>
-            )}
-          </ul>
-        </DisclosureCard>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-3">
-        <DisclosureCard label="TFSA room" value={cad(LIMITS.tfsa)} hint="2026 annual limit">
-          <p className="text-navy-300">
-            Add unused room carried forward from your CRA Notice of Assessment.
-          </p>
-        </DisclosureCard>
-        <DisclosureCard label="RRSP limit" value={cad(LIMITS.rrsp)} hint="18% of earned income, capped">
-          <p className="text-navy-300">
-            Clergy residence deduction may change the income this is calculated on.
-          </p>
-        </DisclosureCard>
-        <DisclosureCard label="FHSA room" value={cad(LIMITS.fhsa)} hint="$40,000 lifetime">
-          <p className="text-navy-300">Unused room carries forward up to $8,000 per year.</p>
-        </DisclosureCard>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <ReceiptScanner />
-        <div className="card">
+        <Card>
           <p className="label">Top arms this year</p>
           <ul className="mt-4 space-y-3">
             {Object.entries(summary?.by_arm ?? {})
@@ -145,20 +219,58 @@ export default function Dashboard() {
               .map(([arm, amount]) => (
                 <li key={arm} className="flex items-center justify-between text-sm">
                   <span className="text-navy-100">{armName(arm)}</span>
-                  <span className="tabular-nums text-gold-300">{cad(amount)}</span>
+                  <span className="tabular-nums text-gold-300">{money(amount)}</span>
                 </li>
               ))}
-            {!summary?.by_arm || Object.keys(summary.by_arm).length === 0 ? (
+            {Object.keys(summary?.by_arm ?? {}).length === 0 && (
               <li className="text-sm text-navy-300">Nothing recorded yet this year.</li>
-            ) : null}
+            )}
           </ul>
           {summary && summary.outstanding_pledges > 0 && (
             <p className="mt-4 text-xs text-gold-300">
-              {cad(summary.outstanding_pledges)} in pledges still outstanding.
+              {money(summary.outstanding_pledges)} in pledges still outstanding.
             </p>
           )}
-        </div>
-      </div>
+        </Card>
+
+        <Card>
+          <SectionHeading
+            title="Recent entries"
+            action={
+              <Link href="/ledger" className="text-xs text-gold-300 hover:underline">
+                Open ledger →
+              </Link>
+            }
+          />
+          <ul className="space-y-2.5 text-sm">
+            {recent.map((row) => (
+              <li key={row.id} className="flex items-baseline justify-between gap-3">
+                <span className="truncate text-navy-100">
+                  {row.merchant ?? row.category_name ?? row.entry_type}
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-navy-300">
+                    {row.date}
+                  </span>
+                </span>
+                <span
+                  className={`tabular-nums ${
+                    row.amount < 0 ? "text-navy-50" : "text-emerald-300"
+                  }`}
+                >
+                  {formatAbs(row.amount, row.currency)}
+                </span>
+              </li>
+            ))}
+            {recent.length === 0 && (
+              <li className="text-navy-300">Nothing logged yet — start in the ledger.</li>
+            )}
+          </ul>
+        </Card>
+      </section>
+
+      {/* Region module: only for ministers filing in Canada. */}
+      {profile?.country_code === "CA" && (
+        <CanadaModule summary={summary} taxYear={TAX_YEAR} />
+      )}
     </div>
   );
 }

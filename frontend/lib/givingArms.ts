@@ -1,6 +1,8 @@
 // Client-side mirror of the giving taxonomy, used to render the picker before
 // /api/giving/arms resolves. The API remains the source of truth for CRA flags.
 
+import { formatMoney } from "./money";
+
 export type Realm =
   | "core_covenant"
   | "ministry_partnership"
@@ -63,9 +65,6 @@ export function isReceiptable(arm: GivingArm, charityNumber?: string | null): bo
   return arm.default_tax_deductible;
 }
 
-export const cad = (value: number) =>
-  new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(value);
+/** Legacy CAD helper, kept so existing callers keep working. New code should use
+ *  `formatMoney` from `lib/money` and pass the row's own currency. */
+export const cad = (value: number) => formatMoney(value, "CAD", { whole: true });

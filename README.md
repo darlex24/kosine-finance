@@ -1,17 +1,43 @@
 # Kosine Finance
 
-Canadian personal finance and Kingdom stewardship for ministers, leaders and church members.
+Global financial stewardship, investment and net-worth tracking for ministers of the gospel.
 
 ```
-supabase/migrations/0001_init.sql   schema, RLS, giving taxonomy, CRA rules, 2026 limits
-backend/                            FastAPI + Supabase + GPT-4o Vision OCR
-frontend/                           Next.js 14 (App Router), Tailwind, Framer Motion
+supabase/migrations/0001_init.sql             schema, RLS, giving taxonomy, CRA rules, 2026 limits
+supabase/migrations/0002_global_taxonomy.sql  currencies, FX, categories, platforms, assets, liabilities
+supabase/migrations/0003_omni_ledger.sql      transactions → multi-currency ledger rows
+supabase/migrations/0004_views.sql            net worth, cash flow, ledger and category views
+backend/                                      FastAPI + Supabase + GPT-4o Vision OCR
+frontend/                                     Next.js 14 (App Router), Tailwind, Framer Motion
 ```
+
+## What V2 adds
+
+- **Stewardship Dashboard** — a real-time net-worth engine (`v_net_worth`) over assets,
+  liabilities and cash, in whatever base currency the user picks, with snapshot history.
+- **Omni-Ledger** (`/ledger`) — a spreadsheet-style grid over `transactions` with inline
+  editing, keyboard navigation, bulk delete with undo, and filters. Full CRUD: any manual or
+  scanned entry can be corrected or removed in place.
+- **Multi-currency** — every row stores its native amount *and* a base-currency amount priced
+  at that row's own date from `fx_rates`, so historical totals do not drift.
+- **Global taxonomy** — ~100 seeded expense categories across 21 groups, plus
+  `investment_platforms` covering brokerages, exchanges and banks across regions. Users can
+  add their own.
+- **Universal OCR** — receipts in any language or currency; `POST /api/ocr/commit` writes the
+  reviewed extraction straight into the ledger.
+- **Region modules** — the Canadian tax surface (TFSA/RRSP/FHSA, CRA credit) now renders only
+  when `users.country_code = 'CA'`. `kingdom_giving_records` is unchanged, and giving now also
+  appears in cash flow as its own outflow band.
 
 ## Run it
 
-**1. Database** — in the Supabase SQL editor, run `supabase/migrations/0001_init.sql`.
+**1. Database** — in the Supabase SQL editor, run the migrations in order: `0001_init.sql`,
+`0002_global_taxonomy.sql`, `0003_omni_ledger.sql`, `0004_views.sql`. `0002`–`0004` are
+additive and backfill existing rows, so an existing database keeps its data.
 Then create a private Storage bucket named `receipts`.
+
+**1b. Exchange rates** — once the API is up, call `POST /api/fx/refresh` (ECB reference rates
+via Frankfurter, no key needed). Until it is called, foreign amounts are stored at par.
 
 **2. Backend**
 
@@ -65,22 +91,34 @@ estimates the federal credit at 15% on the first $200 and 29% above.
 
 ### OCR
 
-`POST /api/ocr/scan` sends the image to GPT-4o Vision with a JSON-only schema, then maps each
-line onto a giving arm — by the model's own label where it is valid, otherwise by keyword
-("rhapsody", "healing school", "firstfruit", "honorarium"…). Deductibility is recomputed
-locally afterwards, so a hallucinated flag can never reach a tax return. Nothing is written:
-the client reviews the extraction and then posts to `/api/giving`.
+`POST /api/ocr/scan` sends the image to GPT-4o Vision with a JSON-only schema and reads
+receipts from anywhere: it infers the ISO-4217 currency from the printed symbol, tax wording
+and locale, normalises the date, and classifies the spend against the seeded category slugs.
+Giving statements are additionally mapped onto a giving arm — by the model's own label where
+it is valid, otherwise by keyword ("rhapsody", "healing school", "firstfruit", "honorarium"…).
+
+Two things are never trusted from the model: deductibility is recomputed locally, and a
+category slug that is not one we seeded is discarded rather than written through.
+
+`/api/ocr/scan` still writes nothing. `POST /api/ocr/commit` takes the extraction *after* the
+user has reviewed and corrected it in the scan preview, stores the image, and inserts the
+ledger row — so the picture lands in the grid without manual typing, and low-confidence
+fields are flagged for review rather than silently accepted.
 
 ## Security
 
 Isolation is enforced by Postgres, not by application code. Each request builds a Supabase
 client bound to the caller's JWT (`backend/app/deps.py`), so every query runs under the
-`*_owner` RLS policies. The service-role key is used only for Storage and reference data.
+`*_owner` RLS policies. The V2 views are declared `security_invoker = true`, so reading
+`v_net_worth` or `v_ledger_rows` is still subject to the caller's own policies. The
+service-role key is used only for Storage and reference data. `frontend/middleware.ts` adds a
+server-side session check ahead of the client-side `AuthProvider` gate.
 
 ## Not yet built
 
-Supabase Auth screens (sign-in/sign-up), bank-feed import, provincial credit rates beyond the
-federal calculation, pledge schedules with reminders, and T1 export. The 2026 figures
+Bank-feed import, provincial credit rates beyond the federal calculation, pledge schedules
+with reminders, T1 export, and live market pricing for holdings (asset values are what you
+enter). There is no automated test suite yet. The 2026 figures
 (TFSA $7,000, RRSP $33,810, FHSA $8,000/$40,000) are hardcoded in
 `backend/app/routers/canada.py` and `public.canadian_limits` — confirm them against the CRA
 before filing, and confirm any charity's registration number in the CRA charities listing.

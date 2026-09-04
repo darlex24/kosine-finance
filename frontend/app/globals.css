@@ -13,6 +13,22 @@
       radial-gradient(50rem 40rem at -10% 10%, rgba(44, 67, 114, 0.35), transparent 60%);
     background-attachment: fixed;
   }
+  /* Money and dates read as columns, never as ragged text. */
+  .tabular-nums,
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {

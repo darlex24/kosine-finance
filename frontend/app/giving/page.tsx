@@ -2,12 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { useCatalog } from "@/components/CatalogProvider";
 import { GivingForm } from "@/components/GivingForm";
 import { api, type GivingSummary } from "@/lib/api";
-import { GIVING_ARMS, REALM_LABELS, REALM_ORDER, cad } from "@/lib/givingArms";
+import { GIVING_ARMS, REALM_LABELS, REALM_ORDER } from "@/lib/givingArms";
+import { formatMoney } from "@/lib/money";
 
 export default function GivingPage() {
+  const { baseCurrency, profile } = useCatalog();
   const [summary, setSummary] = useState<GivingSummary | null>(null);
+
+  // Totals arrive already converted into the user's base currency.
+  const cad = (value: number) => formatMoney(value, baseCurrency, { whole: true });
 
   const load = useCallback(() => {
     api.givingSummary().then(setSummary).catch(() => setSummary(null));
@@ -22,7 +28,9 @@ export default function GivingPage() {
           Giving &amp; <span className="gold-text">Partnership Engine</span>
         </h1>
         <p className="mt-1 text-sm text-navy-300">
-          Every realm and arm of giving, with its Canadian tax treatment attached.
+          Every realm and arm of giving
+          {profile?.country_code === "CA" ? ", with its Canadian tax treatment attached" : ""}.
+          Each gift also flows into your cash flow as a specialised outflow.
         </p>
       </div>
 

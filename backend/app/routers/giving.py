@@ -12,8 +12,23 @@ from ..config import Settings, get_settings
 from ..deps import CurrentUser, get_current_user
 from ..giving import ARM_RULES, GivingArm, PledgeStatus, Realm, is_tax_deductible
 from ..schemas import ArmRuleOut, GivingIn, GivingOut, GivingSummary
+from .ledger import _price_row
 
 router = APIRouter()
+
+
+def _giving_category_id(user: CurrentUser) -> str | None:
+    """The 'Giving & Charity' group, so gifts roll up with the rest of spending."""
+    rows = (
+        user.client.table("expense_categories")
+        .select("id")
+        .eq("slug", "giving_offering")
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    return rows[0]["id"] if rows else None
 
 # CRA federal charitable donation tax credit, 2026 rates.
 FIRST_TIER_CAP = Decimal("200")
@@ -50,23 +65,24 @@ def record_giving(payload: GivingIn, user: CurrentUser = Depends(get_current_use
             )
         rule = ARM_RULES[payload.giving_arm]
         given_on = payload.date or date_cls.today()
-        tx = (
-            user.client.table("transactions")
-            .insert(
-                {
-                    "user_id": user.id,
-                    "account_id": payload.account_id,
-                    # Giving leaves the account, so it is stored as money out.
-                    "amount": float(-abs(payload.amount)),
-                    "category": "kingdom_giving",
-                    "date": given_on.isoformat(),
-                    "merchant": payload.recipient,
-                    "memo": rule.display_name,
-                    "receipt_image_url": payload.receipt_image_url,
-                }
-            )
-            .execute()
-        )
+        body = {
+            "user_id": user.id,
+            "account_id": payload.account_id,
+            # Giving leaves the account, so it is stored as money out.
+            "amount": str(-abs(payload.amount)),
+            "currency": (payload.currency or "").upper() or None,
+            "category": "kingdom_giving",
+            "category_id": _giving_category_id(user),
+            # V2: giving is a first-class ledger band, not an unlabelled expense.
+            "entry_type": "giving",
+            "date": given_on.isoformat(),
+            "merchant": payload.recipient,
+            "memo": rule.display_name,
+            "receipt_image_url": payload.receipt_image_url,
+        }
+        # Fills base_currency / base_amount / fx_rate, which 0003 makes NOT NULL.
+        body = _price_row(user, body, given_on)
+        tx = user.client.table("transactions").insert(body).execute()
         if not tx.data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not create transaction")
         transaction_id = tx.data[0]["id"]
@@ -153,7 +169,7 @@ def giving_summary(
     year = tax_year or settings.current_tax_year
     rows = (
         user.client.table("kingdom_giving_records")
-        .select("*, transactions(amount)")
+        .select("*, transactions(amount, base_amount)")
         .eq("tax_year", year)
         .execute()
         .data
@@ -168,7 +184,8 @@ def giving_summary(
 
     for row in rows:
         tx = row.get("transactions") or {}
-        amount = abs(Decimal(str(tx.get("amount") or 0)))
+        # Sum in the user's base currency so a year of multi-currency giving adds up.
+        amount = abs(Decimal(str(tx.get("base_amount") or tx.get("amount") or 0)))
         by_arm[row["giving_arm"]] += amount
         by_realm[row["realm"]] += amount
         if row["tax_deductible_flag"]:
