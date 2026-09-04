@@ -26,6 +26,10 @@ FRANKFURTER = "https://api.frankfurter.dev/v1"
 # 166 currencies, latest only, no key. Covers the rest of the world.
 OPEN_ERAPI = "https://open.er-api.com/v6/latest"
 
+# Every rate is stored against this one currency, so cross-pairs triangulate
+# through it. Keep it in step with the base used by refresh_rates.
+PIVOT = "USD"
+
 # Today's rate can still be published later in the day, so it is only held
 # briefly. A past date's rate is settled and cached for the process lifetime.
 TODAY_TTL_SECONDS = 15 * 60
@@ -64,11 +68,14 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
     if cached is not None:
         return cached
 
-    rate = _lookup(client, base, quote, on)
+    rate = _direct(client, base, quote, on)
     if rate is None:
-        inverse = _lookup(client, quote, base, on)
-        if inverse and inverse != 0:
-            rate = Decimal(1) / inverse
+        # Rates are stored against a single pivot, so a cross-pair like NGN->CAD
+        # has no row of its own and has to hop through USD.
+        left = _direct(client, base, PIVOT, on)
+        right = _direct(client, PIVOT, quote, on)
+        if left and right:
+            rate = left * right
         else:
             # Par is a deliberate, visible fallback: a row saved at 1:1 is a
             # mistake the user can see and correct, whereas a failed write loses
@@ -83,6 +90,17 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
 
     _cache[key] = (rate, time.time())
     return rate
+
+
+def _direct(client: Client, base: str, quote: str, on: date) -> Decimal | None:
+    """One hop: the stored pair, or the inverse of the opposite pair."""
+    if base == quote:
+        return Decimal(1)
+    found = _lookup(client, base, quote, on)
+    if found is not None:
+        return found
+    inverse = _lookup(client, quote, base, on)
+    return (Decimal(1) / inverse) if inverse and inverse != 0 else None
 
 
 def _lookup(client: Client, base: str, quote: str, on: date) -> Decimal | None:
