@@ -15,12 +15,23 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# "*" with allow_credentials is the classic cross-origin account-takeover
+# combination — any site could then call the API as a signed-in user. The
+# browser spec forbids it, but relying on that leaves the app one config change
+# from a silent hole, so refuse the combination outright at startup.
+_origins = settings.cors_origin_list
+if "*" in _origins:
+    raise RuntimeError(
+        "CORS_ORIGINS must list explicit origins, not '*', because the API is "
+        "served with credentials. Set it to your deployed frontend URL."
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
+    allow_origins=_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(core.router, prefix="/api", tags=["core"])

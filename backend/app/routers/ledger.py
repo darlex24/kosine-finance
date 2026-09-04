@@ -213,8 +213,17 @@ def get_ledger_row(row_id: str, user: CurrentUser = Depends(get_current_user)):
 
 # ------------------------------------------------------------------ write
 
-def _insert(user: CurrentUser, payload: LedgerRowIn) -> dict:
+def _insert(
+    user: CurrentUser, payload: LedgerRowIn, *, trusted_receipt: bool = False
+) -> dict:
     category_id = payload.category_id or _resolve_category(user, payload.category_slug)
+    # Receipt fields are set only by /ocr/commit, which uploaded the file itself
+    # and passes trusted_receipt. Taking them from a request body would let a
+    # client point a row at any URL the UI then renders, or at another user's
+    # storage path — and `source` is client-settable, so it cannot be the gate.
+    if not trusted_receipt:
+        payload.receipt_image_url = None
+        payload.receipt_storage_path = None
     body = {
         "user_id": user.id,
         "date": payload.date.isoformat(),
