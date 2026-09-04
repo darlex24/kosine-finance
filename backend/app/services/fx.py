@@ -11,6 +11,7 @@ visible, correctable mistake; a lost row is not.
 
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -19,12 +20,27 @@ from supabase import Client
 
 FRANKFURTER = "https://api.frankfurter.dev/v1"
 
-# (base, quote, iso_date) -> rate, for the lifetime of the process.
-_cache: dict[tuple[str, str, str], Decimal] = {}
+# Today's rate can still be published later in the day, so it is only held
+# briefly. A past date's rate is settled and cached for the process lifetime.
+TODAY_TTL_SECONDS = 15 * 60
+
+# (base, quote, iso_date) -> (rate, cached_at)
+_cache: dict[tuple[str, str, str], tuple[Decimal, float]] = {}
 
 
 def _key(base: str, quote: str, on: date) -> tuple[str, str, str]:
     return (base.upper(), quote.upper(), on.isoformat())
+
+
+def _cached(key: tuple[str, str, str], on: date) -> Decimal | None:
+    hit = _cache.get(key)
+    if hit is None:
+        return None
+    rate, cached_at = hit
+    if on >= date.today() and time.time() - cached_at > TODAY_TTL_SECONDS:
+        _cache.pop(key, None)
+        return None
+    return rate
 
 
 def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
@@ -37,7 +53,8 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
     if base == quote:
         return Decimal(1)
 
-    cached = _cache.get(_key(base, quote, on))
+    key = _key(base, quote, on)
+    cached = _cached(key, on)
     if cached is not None:
         return cached
 
@@ -46,7 +63,7 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
         inverse = _lookup(client, quote, base, on)
         rate = (Decimal(1) / inverse) if inverse and inverse != 0 else Decimal(1)
 
-    _cache[_key(base, quote, on)] = rate
+    _cache[key] = (rate, time.time())
     return rate
 
 

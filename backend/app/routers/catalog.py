@@ -62,9 +62,21 @@ def update_profile(payload: ProfileIn, user: CurrentUser = Depends(get_current_u
         body["country_code"] = body["country_code"].upper()
     if not body:
         return get_profile(user)
-    return _one(
+
+    updated = _one(
         user.client.table("users").update(body).eq("id", user.id).execute(), "Profile"
     )
+
+    # Reporting converts from each row's native currency on read, so the views
+    # are already correct. This just re-stamps the stored audit columns so they
+    # agree with the new base currency too.
+    if "base_currency" in body:
+        try:
+            user.client.rpc("reprice_transactions", {"p_user": user.id}).execute()
+        except Exception:  # noqa: BLE001 - a stale audit column must not fail the switch
+            pass
+
+    return updated
 
 
 # -------------------------------------------------------------- currencies
