@@ -11,14 +11,20 @@ visible, correctable mistake; a lost row is not.
 
 from __future__ import annotations
 
+import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 from supabase import Client
 
+logger = logging.getLogger(__name__)
+
+# ECB reference rates: authoritative and historical, but ~30 currencies only.
 FRANKFURTER = "https://api.frankfurter.dev/v1"
+# 166 currencies, latest only, no key. Covers the rest of the world.
+OPEN_ERAPI = "https://open.er-api.com/v6/latest"
 
 # Today's rate can still be published later in the day, so it is only held
 # briefly. A past date's rate is settled and cached for the process lifetime.
@@ -61,7 +67,19 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
     rate = _lookup(client, base, quote, on)
     if rate is None:
         inverse = _lookup(client, quote, base, on)
-        rate = (Decimal(1) / inverse) if inverse and inverse != 0 else Decimal(1)
+        if inverse and inverse != 0:
+            rate = Decimal(1) / inverse
+        else:
+            # Par is a deliberate, visible fallback: a row saved at 1:1 is a
+            # mistake the user can see and correct, whereas a failed write loses
+            # the entry. But it is wrong, so say so loudly.
+            logger.warning(
+                "No FX rate for %s->%s on %s — falling back to 1:1. "
+                "Run POST /api/fx/refresh; if it persists, this pair is not "
+                "covered by either rate provider.",
+                base, quote, on,
+            )
+            rate = Decimal(1)
 
     _cache[key] = (rate, time.time())
     return rate
@@ -105,50 +123,114 @@ def convert(client: Client, amount: Decimal, base: str, quote: str, on: date):
     return (amount * rate).quantize(Decimal("0.01")), rate
 
 
-async def refresh_rates(service: Client, base: str = "USD", on: date | None = None) -> dict:
-    """Pull one day of rates for `base` and upsert every pair we hold a currency for.
-
-    Also writes the inverse direction so `get_rate` hits on the first lookup for
-    both `USD->NGN` and `NGN->USD`.
-    """
-    on = on or date.today()
-    codes = [
-        row["code"]
-        for row in (service.table("currencies").select("code").execute().data or [])
-    ]
-    if not codes:
-        return {"base": base, "rate_date": on, "pairs": 0}
-
-    symbols = ",".join(c for c in codes if c != base)
+async def _fetch_frankfurter(
+    base: str, symbols: list[str], on: date
+) -> tuple[date, dict[str, float]]:
+    """ECB reference rates. Authoritative and historical, but only ~30 currencies."""
     async with httpx.AsyncClient(timeout=20) as http:
-        response = await http.get(f"{FRANKFURTER}/{on.isoformat()}", params={
-            "base": base, "symbols": symbols
-        })
+        response = await http.get(
+            f"{FRANKFURTER}/{on.isoformat()}",
+            params={"base": base, "symbols": ",".join(symbols)},
+        )
         response.raise_for_status()
         payload = response.json()
-
     # Frankfurter answers with the nearest preceding business day.
-    rate_date = date.fromisoformat(payload.get("date") or on.isoformat())
-    rates: dict[str, float] = payload.get("rates") or {}
+    return date.fromisoformat(payload.get("date") or on.isoformat()), payload.get("rates") or {}
 
-    rows = []
+
+async def _fetch_open_erapi(base: str) -> tuple[date, dict[str, float]]:
+    """166 currencies, latest only. This is what covers NGN, GHS, KES, XOF and
+    the rest of the world the ECB list leaves out."""
+    async with httpx.AsyncClient(timeout=20) as http:
+        response = await http.get(f"{OPEN_ERAPI}/{base}")
+        response.raise_for_status()
+        payload = response.json()
+    if payload.get("result") != "success":
+        raise RuntimeError(payload.get("error-type") or "open.er-api returned no result")
+    stamp = payload.get("time_last_update_unix")
+    rate_date = (
+        datetime.fromtimestamp(stamp, tz=timezone.utc).date() if stamp else date.today()
+    )
+    return rate_date, payload.get("rates") or {}
+
+
+def _rows_for(base: str, rates: dict[str, float], codes: set[str], on: date) -> list[dict]:
+    """Both directions, so get_rate hits on the first lookup for USD->NGN and NGN->USD."""
+    rows: list[dict] = []
     for quote, value in rates.items():
-        if not value:
+        if quote not in codes or quote == base or not value:
             continue
         rows.append({
             "base": base, "quote": quote,
-            "rate_date": rate_date.isoformat(), "rate": str(value),
+            "rate_date": on.isoformat(), "rate": str(value),
         })
         rows.append({
             "base": quote, "quote": base,
-            "rate_date": rate_date.isoformat(), "rate": str(1 / float(value)),
+            "rate_date": on.isoformat(), "rate": str(1 / float(value)),
         })
+    return rows
 
-    if rows:
+
+async def refresh_rates(service: Client, base: str = "USD", on: date | None = None) -> dict:
+    """Upsert one day of rates for every currency we hold, from two sources.
+
+    The ECB feed covers roughly 30 currencies — it leaves out almost all of
+    Africa, the Gulf and South Asia, which for this app's users is most of the
+    world. open.er-api fills that in. Where both quote a pair the ECB value wins,
+    being the more authoritative reference and the only one with history.
+    """
+    on = on or date.today()
+    codes = {
+        row["code"]
+        for row in (service.table("currencies").select("code").execute().data or [])
+    }
+    if not codes:
+        return {"base": base, "rate_date": on, "pairs": 0, "covered": 0, "missing": []}
+
+    wanted = sorted(c for c in codes if c != base)
+    batches: list[list[dict]] = []
+    covered: set[str] = set()
+
+    # Broad, latest-only. Skipped when backfilling a past date, which it cannot serve.
+    if on >= date.today():
+        try:
+            erapi_date, erapi_rates = await _fetch_open_erapi(base)
+            batches.append(_rows_for(base, erapi_rates, codes, erapi_date))
+            covered |= {c for c in erapi_rates if c in codes}
+        except Exception as exc:  # noqa: BLE001 - one source failing is not fatal
+            logger.warning("open.er-api refresh failed: %s", exc)
+
+    # Narrow but authoritative, and the only source that can serve a past date.
+    try:
+        ecb_date, ecb_rates = await _fetch_frankfurter(base, wanted, on)
+        batches.append(_rows_for(base, ecb_rates, codes, ecb_date))
+        covered |= {c for c in ecb_rates if c in codes}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Frankfurter refresh failed: %s", exc)
+
+    if not batches:
+        raise RuntimeError("No exchange-rate provider could be reached")
+
+    pairs = 0
+    for rows in batches:
+        if not rows:
+            continue
         service.table("fx_rates").upsert(rows, on_conflict="base,quote,rate_date").execute()
+        pairs += len(rows)
+
     _cache.clear()
 
-    return {"base": base, "rate_date": rate_date, "pairs": len(rows)}
+    missing = sorted(c for c in codes if c != base and c not in covered)
+    if missing:
+        logger.warning("No rate available for: %s", ", ".join(missing))
+
+    return {
+        "base": base,
+        "rate_date": on,
+        "pairs": pairs,
+        "covered": len(covered),
+        "missing": missing,
+    }
 
 
 def latest_rate_date(client: Client) -> date | None:

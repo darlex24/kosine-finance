@@ -493,6 +493,9 @@ class FxRefreshOut(BaseModel):
     base: str
     rate_date: DateType
     pairs: int
+    covered: int = 0
+    # Currencies we hold but no provider quotes. Anything here converts at 1:1.
+    missing: list[str] = []
 
 
 class OcrCommitIn(BaseModel):
