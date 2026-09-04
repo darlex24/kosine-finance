@@ -2,6 +2,7 @@
 
 import { useCatalog } from "@/components/CatalogProvider";
 import { Button } from "@/components/ui";
+import { useYears } from "@/components/YearPicker";
 import { ENTRY_TYPES, type LedgerEntryType, type LedgerFilters } from "@/lib/types";
 
 export function LedgerFilterBar({
@@ -12,11 +13,38 @@ export function LedgerFilterBar({
   onChange: (next: LedgerFilters) => void;
 }) {
   const { categories, platforms, currencies } = useCatalog();
+  const { years } = useYears();
   const set = (patch: Partial<LedgerFilters>) => onChange({ ...filters, ...patch });
   const active = Object.values(filters).some(Boolean);
 
+  // The date range is the source of truth; this just sets both ends at once.
+  const selectedYear =
+    filters.date_from?.slice(0, 4) === filters.date_to?.slice(0, 4)
+      ? (filters.date_from?.slice(0, 4) ?? "")
+      : "";
+
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={selectedYear}
+        onChange={(e) =>
+          set(
+            e.target.value
+              ? { date_from: `${e.target.value}-01-01`, date_to: `${e.target.value}-12-31` }
+              : { date_from: undefined, date_to: undefined },
+          )
+        }
+        aria-label="Year"
+        className="input w-28"
+      >
+        <option value="">All years</option>
+        {years.map((y) => (
+          <option key={y} value={y}>
+            {y}
+          </option>
+        ))}
+      </select>
+
       <input
         value={filters.q ?? ""}
         onChange={(e) => set({ q: e.target.value || undefined })}

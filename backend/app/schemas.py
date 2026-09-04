@@ -468,6 +468,21 @@ class CashFlowPoint(BaseModel):
     total: Decimal
 
 
+class AnnualSummary(BaseModel):
+    """One year of the ledger, rolled up. Always recalculated from the entries,
+    never frozen — correcting an old row moves its year with it."""
+
+    year: int
+    base_currency: str
+    income: Decimal
+    expenses: Decimal
+    giving: Decimal
+    saved: Decimal
+    net: Decimal
+    giving_rate: float | None = None
+    savings_rate: float | None = None
+
+
 class CategorySpend(BaseModel):
     category_group: str
     category_name: str

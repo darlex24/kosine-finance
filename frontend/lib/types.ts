@@ -227,6 +227,18 @@ export type CashFlowPoint = {
   total: number;
 };
 
+export type AnnualSummary = {
+  year: number;
+  base_currency: string;
+  income: number;
+  expenses: number;
+  giving: number;
+  saved: number;
+  net: number;
+  giving_rate: number | null;
+  savings_rate: number | null;
+};
+
 export type CategorySpend = {
   category_group: string;
   category_name: string;

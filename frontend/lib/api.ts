@@ -3,6 +3,7 @@
 import { accessToken } from "./supabase";
 import type {
   Account,
+  AnnualSummary,
   Asset,
   Budget,
   CashFlowPoint,
@@ -135,6 +136,8 @@ export const api = {
       method: "POST",
     }),
   cashFlow: (year?: number) => request<CashFlowPoint[]>(`/api/cashflow${qs({ year })}`),
+  years: () => request<number[]>("/api/years"),
+  annualSummary: () => request<AnnualSummary[]>("/api/annual-summary"),
   categorySpend: (year?: number) =>
     request<CategorySpend[]>(`/api/spend-by-category${qs({ year })}`),
 

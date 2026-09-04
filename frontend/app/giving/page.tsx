@@ -4,34 +4,42 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useCatalog } from "@/components/CatalogProvider";
 import { GivingForm } from "@/components/GivingForm";
+import { YearPicker, useYears } from "@/components/YearPicker";
 import { api, type GivingSummary } from "@/lib/api";
 import { GIVING_ARMS, REALM_LABELS, REALM_ORDER } from "@/lib/givingArms";
 import { formatMoney } from "@/lib/money";
 
 export default function GivingPage() {
   const { baseCurrency, profile } = useCatalog();
+  const { years } = useYears();
+  const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState<GivingSummary | null>(null);
 
   // Totals arrive already converted into the user's base currency.
   const cad = (value: number) => formatMoney(value, baseCurrency, { whole: true });
 
   const load = useCallback(() => {
-    api.givingSummary().then(setSummary).catch(() => setSummary(null));
-  }, []);
+    api.givingSummary(year).then(setSummary).catch(() => setSummary(null));
+  }, [year]);
 
   useEffect(load, [load]);
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Giving &amp; <span className="gold-text">Partnership Engine</span>
-        </h1>
-        <p className="mt-1 text-sm text-navy-300">
-          Every realm and arm of giving
-          {profile?.country_code === "CA" ? ", with its Canadian tax treatment attached" : ""}.
-          Each gift also flows into your cash flow as a specialised outflow.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Giving &amp; <span className="gold-text">Partnership Engine</span>
+          </h1>
+          <p className="mt-1 text-sm text-navy-300">
+            Every realm and arm of giving
+            {profile?.country_code === "CA"
+              ? ", with its Canadian tax treatment attached"
+              : ""}
+            . Each gift also flows into your cash flow as a specialised outflow.
+          </p>
+        </div>
+        <YearPicker years={years} value={year} onChange={setYear} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -39,7 +47,9 @@ export default function GivingPage() {
 
         <aside className="space-y-4">
           <div className="card-gold">
-            <p className="label">Year to date</p>
+            <p className="label">
+              {year === new Date().getFullYear() ? "Year to date" : `Total for ${year}`}
+            </p>
             <p className="figure mt-2 gold-text">{cad(summary?.total_given ?? 0)}</p>
             <dl className="mt-4 space-y-2 text-sm">
               <div className="flex justify-between">

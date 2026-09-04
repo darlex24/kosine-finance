@@ -6,46 +6,62 @@ import { useEffect, useState } from "react";
 
 import { useCatalog } from "@/components/CatalogProvider";
 import { CashFlowChart, Sparkline } from "@/components/dashboard/charts";
+import { YearlyRecord } from "@/components/dashboard/YearlyRecord";
 import { DisclosureCard } from "@/components/DisclosureCard";
 import { CanadaModule } from "@/components/regions/CanadaModule";
 import { Button, Card, SectionHeading, Skeleton, StatTile } from "@/components/ui";
+import { YearPicker, useYears } from "@/components/YearPicker";
 import { api, type GivingSummary } from "@/lib/api";
 import { GIVING_ARMS, REALM_LABELS, REALM_ORDER, type Realm } from "@/lib/givingArms";
 import { formatAbs, formatMoney, formatPercent } from "@/lib/money";
-import type { CashFlowPoint, CategorySpend, LedgerRow, NetWorth } from "@/lib/types";
-
-const TAX_YEAR = 2026;
+import type {
+  AnnualSummary,
+  CashFlowPoint,
+  CategorySpend,
+  LedgerRow,
+  NetWorth,
+} from "@/lib/types";
 
 export default function Dashboard() {
   const { profile, baseCurrency, ready } = useCatalog();
+  const { years } = useYears();
+  const [year, setYear] = useState(new Date().getFullYear());
   const [netWorth, setNetWorth] = useState<NetWorth | null>(null);
   const [cashFlow, setCashFlow] = useState<CashFlowPoint[]>([]);
   const [spend, setSpend] = useState<CategorySpend[]>([]);
   const [recent, setRecent] = useState<LedgerRow[]>([]);
   const [summary, setSummary] = useState<GivingSummary | null>(null);
+  const [annual, setAnnual] = useState<AnnualSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [snapshotting, setSnapshotting] = useState(false);
 
+  // Net worth and the yearly record are position-in-time and whole-history, so
+  // they are fetched once; everything else re-reads when the year changes.
   useEffect(() => {
     if (!ready) return;
-    Promise.all([
-      api.netWorth(),
-      api.cashFlow(TAX_YEAR),
-      api.categorySpend(TAX_YEAR),
-      api.ledger({ limit: 8 }),
-      api.givingSummary(TAX_YEAR),
-    ])
-      .then(([nw, flow, categories, ledger, giving]) => {
+    Promise.all([api.netWorth(), api.annualSummary(), api.ledger({ limit: 8 })])
+      .then(([nw, summaries, ledger]) => {
         setNetWorth(nw);
-        setCashFlow(flow);
-        setSpend(categories);
+        setAnnual(summaries);
         setRecent(ledger.rows);
-        setSummary(giving);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not load your dashboard"),
       );
   }, [ready]);
+
+  useEffect(() => {
+    if (!ready) return;
+    Promise.all([api.cashFlow(year), api.categorySpend(year), api.givingSummary(year)])
+      .then(([flow, categories, giving]) => {
+        setCashFlow(flow);
+        setSpend(categories);
+        setSummary(giving);
+      })
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : `Could not load ${year}`),
+      );
+  }, [ready, year]);
 
   const money = (value: number | null | undefined, whole = true) =>
     formatMoney(value ?? 0, netWorth?.base_currency ?? baseCurrency, { whole });
@@ -71,14 +87,18 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2 }}
+        className="flex flex-wrap items-end justify-between gap-4"
       >
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Your stewardship, <span className="gold-text">{TAX_YEAR}</span>
-        </h1>
-        <p className="mt-1 text-sm text-navy-300">
-          {profile?.full_name ? `${profile.full_name} · ` : ""}
-          Everything you hold, everything you give — in {baseCurrency}.
-        </p>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Your stewardship, <span className="gold-text">{year}</span>
+          </h1>
+          <p className="mt-1 text-sm text-navy-300">
+            {profile?.full_name ? `${profile.full_name} · ` : ""}
+            Everything you hold, everything you give — in {baseCurrency}.
+          </p>
+        </div>
+        <YearPicker years={years} value={year} onChange={setYear} />
       </motion.header>
 
       {error && (
@@ -152,13 +172,13 @@ export default function Dashboard() {
         <Card className="lg:col-span-2">
           <SectionHeading
             title="Cash flow"
-            hint={`Monthly, ${TAX_YEAR} — giving shown as its own outflow`}
+            hint={`Monthly, ${year} — giving shown as its own outflow`}
           />
           <CashFlowChart points={cashFlow} currency={baseCurrency} />
         </Card>
 
         <Card>
-          <SectionHeading title="Where it goes" hint={`Top categories, ${TAX_YEAR}`} />
+          <SectionHeading title="Where it goes" hint={`Top categories, ${year}`} />
           <ul className="space-y-2.5">
             {spend.slice(0, 8).map((item) => (
               <li key={`${item.category_group}-${item.category_name}`} className="text-sm">
@@ -186,7 +206,7 @@ export default function Dashboard() {
       {/* --------------------------------------------------------- giving */}
       <section className="grid gap-4 md:grid-cols-3">
         <DisclosureCard
-          label="Given this year"
+          label={`Given in ${year}`}
           value={money(summary?.total_given ?? 0)}
           accent
           hint={
@@ -211,7 +231,7 @@ export default function Dashboard() {
         </DisclosureCard>
 
         <Card>
-          <p className="label">Top arms this year</p>
+          <p className="label">Top arms in {year}</p>
           <ul className="mt-4 space-y-3">
             {Object.entries(summary?.by_arm ?? {})
               .sort((a, b) => b[1] - a[1])
@@ -223,7 +243,7 @@ export default function Dashboard() {
                 </li>
               ))}
             {Object.keys(summary?.by_arm ?? {}).length === 0 && (
-              <li className="text-sm text-navy-300">Nothing recorded yet this year.</li>
+              <li className="text-sm text-navy-300">Nothing recorded in {year}.</li>
             )}
           </ul>
           {summary && summary.outstanding_pledges > 0 && (
@@ -267,9 +287,12 @@ export default function Dashboard() {
         </Card>
       </section>
 
+      {/* ---------------------------------------------------- yearly record */}
+      <YearlyRecord rows={annual} selectedYear={year} onSelectYear={setYear} />
+
       {/* Region module: only for ministers filing in Canada. */}
       {profile?.country_code === "CA" && (
-        <CanadaModule summary={summary} taxYear={TAX_YEAR} />
+        <CanadaModule summary={summary} taxYear={year} />
       )}
     </div>
   );

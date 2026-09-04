@@ -13,7 +13,13 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..deps import CurrentUser, get_current_user
-from ..schemas import CashFlowPoint, CategorySpend, NetWorthOut, NetWorthPoint
+from ..schemas import (
+    AnnualSummary,
+    CashFlowPoint,
+    CategorySpend,
+    NetWorthOut,
+    NetWorthPoint,
+)
 
 router = APIRouter()
 
@@ -108,3 +114,64 @@ def get_category_spend(year: int | None = None, user: CurrentUser = Depends(get_
     if year:
         query = query.eq("year", year)
     return _rows(query.order("total", desc=True).limit(50).execute())
+
+
+@router.get("/years", response_model=list[int])
+def list_years(user: CurrentUser = Depends(get_current_user)):
+    """Every year the user actually has entries for, newest first.
+
+    Drives the year picker, so it only ever offers years with something in them
+    — plus the current year, which is always selectable even when empty.
+    """
+    rows = _rows(user.client.table("v_cash_flow_monthly").select("year").execute())
+    years = {int(row["year"]) for row in rows}
+    years.add(date.today().year)
+    return sorted(years, reverse=True)
+
+
+@router.get("/annual-summary", response_model=list[AnnualSummary])
+def get_annual_summary(user: CurrentUser = Depends(get_current_user)):
+    """The yearly record: one line per year, newest first.
+
+    Built from the same monthly view the dashboard chart uses, so a year's
+    figures always reflect the ledger as it stands — correct an old row and its
+    year moves with it.
+    """
+    rows = _rows(
+        user.client.table("v_cash_flow_monthly")
+        .select("year, entry_type, total, base_currency")
+        .execute()
+    )
+
+    buckets: dict[int, dict[str, Decimal]] = {}
+    currency = None
+    for row in rows:
+        year = int(row["year"])
+        currency = currency or row.get("base_currency")
+        bucket = buckets.setdefault(year, {})
+        key = row["entry_type"]
+        bucket[key] = bucket.get(key, Decimal("0")) + Decimal(str(row["total"] or 0))
+
+    summaries = []
+    for year in sorted(buckets, reverse=True):
+        bucket = buckets[year]
+        income = bucket.get("income", Decimal("0"))
+        expenses = bucket.get("expense", Decimal("0"))
+        giving = bucket.get("giving", Decimal("0"))
+        saved = bucket.get("savings", Decimal("0")) + bucket.get("investment", Decimal("0"))
+        summaries.append(
+            AnnualSummary(
+                year=year,
+                base_currency=currency or "CAD",
+                income=income,
+                expenses=expenses,
+                giving=giving,
+                saved=saved,
+                # Transfers move money between the user's own pots, so they are
+                # deliberately left out of the net figure.
+                net=income - expenses - giving - saved,
+                giving_rate=float(giving / income * 100) if income else None,
+                savings_rate=float(saved / income * 100) if income else None,
+            )
+        )
+    return summaries
