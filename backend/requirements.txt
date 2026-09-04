@@ -5,4 +5,5 @@ pydantic-settings>=2.4
 supabase>=2.7
 openai>=1.40
 python-multipart>=0.0.9
-httpx>=0.27
+httpx
+pytest>=8.0>=0.27

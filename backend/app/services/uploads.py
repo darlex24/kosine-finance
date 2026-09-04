@@ -68,7 +68,7 @@ async def read_validated(file: UploadFile, max_bytes: int = MAX_BYTES) -> tuple[
         buffer.extend(chunk)
         if len(buffer) > max_bytes:
             raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                413,  # Content Too Large; the Starlette constant was renamed.
                 f"File is larger than {max_bytes // (1024 * 1024)} MB.",
             )
 
