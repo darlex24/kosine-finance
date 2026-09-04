@@ -10,7 +10,7 @@ import { GIVING_ARMS, REALM_LABELS, REALM_ORDER } from "@/lib/givingArms";
 import { formatMoney } from "@/lib/money";
 
 export default function GivingPage() {
-  const { baseCurrency, profile } = useCatalog();
+  const { baseCurrency, profile, invalidate, dataVersion } = useCatalog();
   const { years } = useYears();
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState<GivingSummary | null>(null);
@@ -20,9 +20,15 @@ export default function GivingPage() {
 
   const load = useCallback(() => {
     api.givingSummary(year).then(setSummary).catch(() => setSummary(null));
-  }, [year]);
+  }, [year, dataVersion]);
 
   useEffect(load, [load]);
+
+  // A gift is also a ledger outflow, so recording one has to reach the dashboard.
+  const onSaved = useCallback(() => {
+    load();
+    invalidate();
+  }, [load, invalidate]);
 
   return (
     <div className="space-y-8">
@@ -43,7 +49,7 @@ export default function GivingPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <GivingForm onSaved={load} />
+        <GivingForm onSaved={onSaved} />
 
         <aside className="space-y-4">
           <div className="card-gold">

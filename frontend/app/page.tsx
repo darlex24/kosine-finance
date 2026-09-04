@@ -23,7 +23,7 @@ import type {
 } from "@/lib/types";
 
 export default function Dashboard() {
-  const { profile, baseCurrency, ready } = useCatalog();
+  const { profile, baseCurrency, ready, dataVersion, invalidate } = useCatalog();
   const { years } = useYears();
   const [year, setYear] = useState(new Date().getFullYear());
   const [netWorth, setNetWorth] = useState<NetWorth | null>(null);
@@ -48,7 +48,9 @@ export default function Dashboard() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Could not load your dashboard"),
       );
-  }, [ready]);
+    // dataVersion: any write anywhere in the app, a base-currency switch, or
+    // returning to the tab re-reads these.
+  }, [ready, dataVersion]);
 
   useEffect(() => {
     if (!ready) return;
@@ -61,7 +63,7 @@ export default function Dashboard() {
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : `Could not load ${year}`),
       );
-  }, [ready, year]);
+  }, [ready, year, dataVersion]);
 
   const money = (value: number | null | undefined, whole = true) =>
     formatMoney(value ?? 0, netWorth?.base_currency ?? baseCurrency, { whole });
@@ -73,7 +75,7 @@ export default function Dashboard() {
     setSnapshotting(true);
     try {
       await api.snapshotNetWorth();
-      setNetWorth(await api.netWorth());
+      invalidate();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the snapshot");
     } finally {

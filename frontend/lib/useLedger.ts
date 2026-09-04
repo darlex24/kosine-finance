@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useCatalog } from "@/components/CatalogProvider";
+
 import { api } from "./api";
 import type { LedgerDraft, LedgerFilters, LedgerRow } from "./types";
 
@@ -14,6 +16,9 @@ const PAGE_SIZE = 100;
  * delete in memory long enough for the toast to offer it back.
  */
 export function useLedger(filters: LedgerFilters) {
+  // Every successful write bumps this, so the dashboard's derived figures —
+  // net worth, cash flow, the yearly record — pick the change up.
+  const { invalidate } = useCatalog();
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +75,7 @@ export function useLedger(filters: LedgerFilters) {
       setRows((current) =>
         [created, ...current].sort((a, b) => b.date.localeCompare(a.date)),
       );
+      invalidate();
       return created;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save that row");
@@ -77,7 +83,7 @@ export function useLedger(filters: LedgerFilters) {
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [invalidate]);
 
   const update = useCallback(
     async (id: string, patch: Partial<LedgerDraft>) => {
@@ -94,6 +100,7 @@ export function useLedger(filters: LedgerFilters) {
       try {
         const saved = await api.updateLedgerRow(id, patch);
         setRows((current) => current.map((row) => (row.id === id ? saved : row)));
+        invalidate();
         return saved;
       } catch (err) {
         setRows((current) => current.map((row) => (row.id === id ? before : row)));
@@ -103,7 +110,7 @@ export function useLedger(filters: LedgerFilters) {
         setSaving(false);
       }
     },
-    [rows],
+    [rows, invalidate],
   );
 
   const remove = useCallback(
@@ -114,6 +121,7 @@ export function useLedger(filters: LedgerFilters) {
       try {
         if (ids.length === 1) await api.deleteLedgerRow(ids[0]);
         else await api.deleteLedgerRows(ids);
+        invalidate();
       } catch (err) {
         setRows((current) =>
           [...removed, ...current].sort((a, b) => b.date.localeCompare(a.date)),
@@ -125,7 +133,7 @@ export function useLedger(filters: LedgerFilters) {
       }
       return removed;
     },
-    [rows],
+    [rows, invalidate],
   );
 
   /** Re-create rows a delete removed. Ids change; nothing else does. */
@@ -151,16 +159,21 @@ export function useLedger(filters: LedgerFilters) {
     setRows((current) =>
       [...restored, ...current].sort((a, b) => b.date.localeCompare(a.date)),
     );
-  }, []);
+    invalidate();
+  }, [invalidate]);
 
   /** Splice a row created elsewhere (the OCR flow) into the grid. */
-  const insert = useCallback((row: LedgerRow) => {
-    setRows((current) =>
-      [row, ...current.filter((r) => r.id !== row.id)].sort((a, b) =>
-        b.date.localeCompare(a.date),
-      ),
-    );
-  }, []);
+  const insert = useCallback(
+    (row: LedgerRow) => {
+      setRows((current) =>
+        [row, ...current.filter((r) => r.id !== row.id)].sort((a, b) =>
+          b.date.localeCompare(a.date),
+        ),
+      );
+      invalidate();
+    },
+    [invalidate],
+  );
 
   return {
     rows,

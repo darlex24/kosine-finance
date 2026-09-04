@@ -34,7 +34,10 @@ const LIABILITY_KINDS: { value: LiabilityKind; label: string }[] = [
 ];
 
 export default function AssetsPage() {
-  const { platforms, currencies, baseCurrency, ready } = useCatalog();
+  // Assets and liabilities ARE net worth, so every write here has to reach the
+  // dashboard.
+  const { platforms, currencies, baseCurrency, ready, invalidate, dataVersion } =
+    useCatalog();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [liabilities, setLiabilities] = useState<Liability[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +55,8 @@ export default function AssetsPage() {
 
   useEffect(() => {
     if (ready) void load();
-  }, [ready, load]);
+    // dataVersion so a base-currency switch or a focus return re-reads.
+  }, [ready, load, dataVersion]);
 
   const grouped = useMemo(() => {
     const map = new Map<AssetClass, Asset[]>();
@@ -86,6 +90,7 @@ export default function AssetsPage() {
         <AssetForm
           onCreated={(asset) => {
             setAssets((current) => [...current, asset]);
+            invalidate();
             toast.show(`${asset.name} added`);
           }}
         />
@@ -110,10 +115,12 @@ export default function AssetsPage() {
                       setAssets((current) =>
                         current.map((a) => (a.id === asset.id ? saved : a)),
                       );
+                      invalidate();
                     }}
                     onDelete={async () => {
                       await api.deleteAsset(asset.id);
                       setAssets((current) => current.filter((a) => a.id !== asset.id));
+                      invalidate();
                       toast.show(`${asset.name} removed`);
                     }}
                   />
@@ -139,6 +146,7 @@ export default function AssetsPage() {
         <LiabilityForm
           onCreated={(liability) => {
             setLiabilities((current) => [...current, liability]);
+            invalidate();
             toast.show(`${liability.name} added`);
           }}
         />
@@ -160,10 +168,12 @@ export default function AssetsPage() {
                 setLiabilities((current) =>
                   current.map((l) => (l.id === liability.id ? saved : l)),
                 );
+                invalidate();
               }}
               onDelete={async () => {
                 await api.deleteLiability(liability.id);
                 setLiabilities((current) => current.filter((l) => l.id !== liability.id));
+                invalidate();
                 toast.show(`${liability.name} removed`);
               }}
             />

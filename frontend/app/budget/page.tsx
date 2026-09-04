@@ -17,7 +17,7 @@ const MONTH = now.getMonth() + 1;
  * so the ledger can be reconciled against what was planned.
  */
 export default function BudgetPage() {
-  const { baseCurrency, ready } = useCatalog();
+  const { baseCurrency, ready, invalidate } = useCatalog();
   const [income, setIncome] = useState(6000);
   const [givingPct, setGivingPct] = useState(15);
   const [savingsPct, setSavingsPct] = useState(20);
@@ -64,6 +64,7 @@ export default function BudgetPage() {
         allocated_savings: savings,
         notes: null,
       });
+      invalidate();
       toast.show("Allocation saved for this month");
     } catch (err) {
       toast.show(err instanceof Error ? err.message : "Could not save the allocation");

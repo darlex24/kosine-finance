@@ -24,6 +24,11 @@ type CatalogState = {
   categoryById: Map<string, Category>;
   refresh: () => Promise<void>;
   setBaseCurrency: (code: string) => Promise<void>;
+  /** Bumped by every write anywhere in the app, and on window focus. Screens
+   *  showing derived figures depend on it, so the dashboard reflects an edit
+   *  made on the ledger without needing a manual reload. */
+  dataVersion: number;
+  invalidate: () => void;
 };
 
 const CatalogContext = createContext<CatalogState | null>(null);
@@ -43,6 +48,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!session) return;
@@ -71,10 +77,30 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const setBaseCurrency = useCallback(async (code: string) => {
-    const updated = await api.updateMe({ base_currency: code });
-    setProfile(updated);
-  }, []);
+  const invalidate = useCallback(() => setDataVersion((v) => v + 1), []);
+
+  // Coming back to the tab should not show figures from an hour ago.
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState === "visible") invalidate();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [invalidate]);
+
+  const setBaseCurrency = useCallback(
+    async (code: string) => {
+      const updated = await api.updateMe({ base_currency: code });
+      setProfile(updated);
+      // Every figure in the app is denominated in this — re-read them all.
+      invalidate();
+    },
+    [invalidate],
+  );
 
   const value = useMemo<CatalogState>(
     () => ({
@@ -89,8 +115,22 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       categoryById: new Map(categories.map((c) => [c.id, c])),
       refresh,
       setBaseCurrency,
+      dataVersion,
+      invalidate,
     }),
-    [profile, categories, platforms, currencies, accounts, ready, error, refresh, setBaseCurrency],
+    [
+      profile,
+      categories,
+      platforms,
+      currencies,
+      accounts,
+      ready,
+      error,
+      refresh,
+      setBaseCurrency,
+      dataVersion,
+      invalidate,
+    ],
   );
 
   return <CatalogContext.Provider value={value}>{children}</CatalogContext.Provider>;
