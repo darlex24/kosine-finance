@@ -8,6 +8,7 @@ import { useCatalog } from "@/components/CatalogProvider";
 import { CashFlowChart, Sparkline } from "@/components/dashboard/charts";
 import { YearlyRecord } from "@/components/dashboard/YearlyRecord";
 import { DisclosureCard } from "@/components/DisclosureCard";
+import { ReceiptScanner } from "@/components/ReceiptScanner";
 import { CanadaModule } from "@/components/regions/CanadaModule";
 import { Button, Card, SectionHeading, Skeleton, StatTile } from "@/components/ui";
 import { YearPicker, useYears } from "@/components/YearPicker";
@@ -289,8 +290,19 @@ export default function Dashboard() {
         </Card>
       </section>
 
-      {/* ---------------------------------------------------- yearly record */}
-      <YearlyRecord rows={annual} selectedYear={year} onSelectYear={setYear} />
+      {/* ------------------------------------------------------------ scan */}
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-1">
+          {/* Committing a scan bumps dataVersion, so every figure above
+              re-reads without a navigation. */}
+          <ReceiptScanner onCommitted={() => invalidate()} />
+        </div>
+
+        {/* -------------------------------------------------- yearly record */}
+        <div className="lg:col-span-2">
+          <YearlyRecord rows={annual} selectedYear={year} onSelectYear={setYear} />
+        </div>
+      </section>
 
       {/* Region module: only for ministers filing in Canada. */}
       {profile?.country_code === "CA" && (

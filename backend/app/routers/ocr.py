@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -15,6 +16,7 @@ from ..services import ocr as ocr_service
 from .ledger import _insert as insert_ledger_row
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 MAX_BYTES = 10 * 1024 * 1024
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
@@ -101,11 +103,22 @@ async def commit_scan(
 
         suffix = (file.filename or "").rsplit(".", 1)[-1].lower() or "jpg"
         path = f"{user.id}/{uuid.uuid4()}.{suffix}"
-        bucket = service.storage.from_(settings.supabase_receipt_bucket)
-        bucket.upload(path, content, {"content-type": file.content_type, "upsert": "false"})
-        signed = bucket.create_signed_url(path, 60 * 60 * 24 * 365)
-
-        payload.receipt_storage_path = path
-        payload.receipt_image_url = signed.get("signedURL") or signed.get("signedUrl")
+        try:
+            bucket = service.storage.from_(settings.supabase_receipt_bucket)
+            bucket.upload(
+                path, content, {"content-type": file.content_type, "upsert": "false"}
+            )
+            signed = bucket.create_signed_url(path, 60 * 60 * 24 * 365)
+            payload.receipt_storage_path = path
+            payload.receipt_image_url = signed.get("signedURL") or signed.get("signedUrl")
+        except Exception as exc:  # noqa: BLE001
+            # Storage is misconfigured (missing bucket, bad service-role key) or
+            # unreachable. The extraction the user just reviewed is the valuable
+            # part — keep the entry rather than losing it over the image, and
+            # note why the receipt is not attached.
+            logger.warning("Receipt upload failed, saving entry without image: %s", exc)
+            payload.memo = " · ".join(
+                filter(None, [payload.memo, "receipt image not stored"])
+            )
 
     return insert_ledger_row(user, payload)
