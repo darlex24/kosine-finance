@@ -98,15 +98,34 @@ export default function BudgetPage() {
       if (Number(l.allocated) > 0 || Number(l.actual) > 0) keys.add(l.category_id);
     }
     return [...keys]
-      .map((id) => lineByCategory.get(id))
-      .filter((l): l is BudgetLine => Boolean(l))
+      .map((id): BudgetLine | null => {
+        const existing = lineByCategory.get(id);
+        if (existing) return existing;
+        // No line from the API: a category with no spend yet. Build one rather
+        // than dropping it, or picking it from the search would do nothing
+        // visible and look broken.
+        const category = categories.find((c) => c.id === id);
+        if (!category) return null;
+        return {
+          category_id: id,
+          category_name: category.name,
+          category_group: category.group,
+          entry_type: null,
+          allocated: 0,
+          actual: 0,
+          variance: 0,
+          used_pct: null,
+          entry_count: 0,
+        };
+      })
+      .filter((l): l is BudgetLine => l !== null)
       .sort(
         (a, b) =>
           a.category_group.localeCompare(b.category_group) ||
           b.actual - a.actual ||
           a.category_name.localeCompare(b.category_name),
       );
-  }, [picked, data, lineByCategory]);
+  }, [picked, data, lineByCategory, categories]);
 
   const categoryOptions = useMemo<Option[]>(
     () =>
@@ -247,7 +266,7 @@ export default function BudgetPage() {
           </div>
 
           {/* ------------------------------------------------ add a category */}
-          <Card accent>
+          <Card accent className="relative z-40">
             <SectionHeading
               title="Add a category to this month"
               hint="Search any of your categories, then set what you plan to spend"
