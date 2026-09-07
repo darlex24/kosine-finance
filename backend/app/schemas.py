@@ -580,6 +580,16 @@ class BudgetMonth(BaseModel):
     lines: list[BudgetLine] = []
 
 
+class BudgetYear(BaseModel):
+    """A whole year per category: what was planned against what was spent."""
+
+    year: int
+    base_currency: str
+    total_allocated: Decimal = Decimal("0")
+    total_actual: Decimal = Decimal("0")
+    lines: list[BudgetLine] = []
+
+
 class GivingByArm(BaseModel):
     year: int
     month: int

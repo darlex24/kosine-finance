@@ -322,3 +322,11 @@ export type BudgetMonth = {
   unallocated: number;
   lines: BudgetLine[];
 };
+
+export type BudgetYear = {
+  year: number;
+  base_currency: string;
+  total_allocated: number;
+  total_actual: number;
+  lines: BudgetLine[];
+};

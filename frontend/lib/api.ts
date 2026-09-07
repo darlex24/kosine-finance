@@ -8,6 +8,7 @@ import type {
   Asset,
   Budget,
   BudgetMonth,
+  BudgetYear,
   CashFlowPoint,
   Category,
   CategorySpend,
@@ -175,6 +176,7 @@ export const api = {
   // Envelope budgeting (0012): planned per category, against actuals.
   budgetMonth: (year: number, month: number) =>
     request<BudgetMonth>(`/api/budget${qs({ year, month })}`),
+  budgetYear: (year: number) => request<BudgetYear>(`/api/budget/year${qs({ year })}`),
   saveAllocations: (
     year: number,
     month: number,

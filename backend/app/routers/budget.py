@@ -17,6 +17,7 @@ from ..schemas import (
     BudgetAllocationsIn,
     BudgetLine,
     BudgetMonth,
+    BudgetYear,
 )
 from .ledger import _base_currency
 
@@ -242,3 +243,83 @@ def copy_forward(
     ).execute()
 
     return get_budget(to_year, to_month, user)
+
+
+@router.get("/budget/year", response_model=BudgetYear)
+def get_budget_year(
+    year: int = Query(ge=2000, le=2100),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """The whole year per category: allocated across all twelve months against
+    what was actually spent.
+
+    A month at a time answers "am I on track this month"; only the year answers
+    "what does this category actually cost me", which is the number you budget
+    from next time.
+    """
+    allocations = _rows(
+        user.client.table("budget_allocations")
+        .select("category_id, allocated")
+        .eq("year", year)
+        .execute()
+    )
+    actuals = _rows(
+        user.client.table("v_budget_actuals")
+        .select("category_id, category_group, category_name, total, entry_count")
+        .eq("year", year)
+        .execute()
+    )
+    categories = {
+        c["id"]: c
+        for c in _rows(
+            user.client.table("expense_categories")
+            .select('id, name, "group", parent_id')
+            .execute()
+        )
+        if c.get("parent_id") is not None
+    }
+
+    lines: dict[str, BudgetLine] = {}
+
+    def line_for(key: str, name: str, group: str) -> BudgetLine:
+        if key not in lines:
+            lines[key] = BudgetLine(
+                category_id=None if key == UNCATEGORISED else key,
+                category_name=name,
+                category_group=group,
+            )
+        return lines[key]
+
+    for row in allocations:
+        key = row["category_id"] or UNCATEGORISED
+        meta = categories.get(key, {})
+        line = line_for(key, meta.get("name") or "Uncategorised", meta.get("group") or "Other")
+        line.allocated += Decimal(str(row["allocated"] or 0))
+
+    for row in actuals:
+        key = row["category_id"] or UNCATEGORISED
+        line = line_for(
+            key,
+            row["category_name"] or "Uncategorised",
+            row["category_group"] or "Other",
+        )
+        line.actual += Decimal(str(row["total"] or 0))
+        line.entry_count += row.get("entry_count") or 0
+
+    for line in lines.values():
+        line.variance = line.allocated - line.actual
+        line.used_pct = (
+            float(line.actual / line.allocated * 100) if line.allocated > 0 else None
+        )
+
+    ordered = sorted(
+        lines.values(),
+        key=lambda l: (-float(l.actual), -float(l.allocated), l.category_name),
+    )
+    return BudgetYear(
+        year=year,
+        base_currency=_base_currency(user),
+        total_allocated=sum((l.allocated for l in ordered), Decimal("0")),
+        total_actual=sum((l.actual for l in ordered), Decimal("0")),
+        lines=ordered,
+    )
