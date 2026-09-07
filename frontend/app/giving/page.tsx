@@ -10,7 +10,7 @@ import { GIVING_ARMS, REALM_LABELS, REALM_ORDER } from "@/lib/givingArms";
 import { formatMoney } from "@/lib/money";
 
 export default function GivingPage() {
-  const { baseCurrency, profile, invalidate, dataVersion } = useCatalog();
+  const { baseCurrency, profile, invalidate, dataVersion, arms } = useCatalog();
   const { years } = useYears();
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState<GivingSummary | null>(null);
@@ -79,7 +79,9 @@ export default function GivingPage() {
             <div key={realm} className="card">
               <p className="label">{REALM_LABELS[realm]}</p>
               <ul className="mt-3 space-y-2 text-sm">
-                {GIVING_ARMS.filter((a) => a.realm === realm).map((a) => (
+                {(arms.length > 0 ? arms : GIVING_ARMS)
+                  .filter((a) => a.realm === realm)
+                  .map((a) => (
                   <li key={a.arm} className="flex items-center justify-between gap-3">
                     <span className="text-navy-100">{a.display_name}</span>
                     <span className="tabular-nums text-navy-300">

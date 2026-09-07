@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
-import type { Account, Category, Currency, Platform, Profile } from "@/lib/types";
+import type { Account, ArmRule, Category, Currency, Platform, Profile } from "@/lib/types";
 
 import { useAuth } from "./AuthProvider";
 
@@ -19,6 +19,9 @@ type CatalogState = {
   platforms: Platform[];
   currencies: Currency[];
   accounts: Account[];
+  /** Seeded giving arms plus the user's own. Fetched, not hardcoded — a church
+   *  outside Loveworld defines its own and they must appear in every picker. */
+  arms: ArmRule[];
   ready: boolean;
   error: string | null;
   categoryById: Map<string, Category>;
@@ -46,6 +49,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [arms, setArms] = useState<ArmRule[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dataVersion, setDataVersion] = useState(0);
@@ -53,18 +57,20 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     if (!session) return;
     try {
-      const [me, cats, plats, curr, accs] = await Promise.all([
+      const [me, cats, plats, curr, accs, armList] = await Promise.all([
         api.me(),
         api.categories(),
         api.platforms(),
         api.currencies(),
         api.accounts(),
+        api.arms(),
       ]);
       setProfile(me);
       setCategories(cats);
       setPlatforms(plats);
       setCurrencies(curr);
       setAccounts(accs);
+      setArms(armList);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load reference data");
@@ -110,6 +116,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       platforms,
       currencies,
       accounts,
+      arms,
       ready,
       error,
       categoryById: new Map(categories.map((c) => [c.id, c])),
@@ -124,6 +131,7 @@ export function CatalogProvider({ children }: { children: React.ReactNode }) {
       platforms,
       currencies,
       accounts,
+      arms,
       ready,
       error,
       refresh,

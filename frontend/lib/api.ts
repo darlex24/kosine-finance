@@ -4,6 +4,7 @@ import { accessToken } from "./supabase";
 import type {
   Account,
   AnnualSummary,
+  ArmRule,
   Asset,
   Budget,
   CashFlowPoint,
@@ -173,7 +174,14 @@ export const api = {
 
   givingSummary: (year?: number) =>
     request<GivingSummary>(`/api/giving/summary${qs({ tax_year: year })}`),
-  arms: () => request<unknown[]>("/api/giving/arms"),
+  arms: () => request<ArmRule[]>("/api/giving/arms"),
+  createArm: (body: {
+    display_name: string;
+    realm: string;
+    default_tax_deductible: boolean;
+    requires_registered_charity: boolean;
+  }) => request<ArmRule>("/api/giving/arms", { method: "POST", body: JSON.stringify(body) }),
+  deleteArm: (id: string) => request<void>(`/api/giving/arms/${id}`, { method: "DELETE" }),
   recordGiving: (body: Record<string, unknown>) =>
     request<unknown>("/api/giving", { method: "POST", body: JSON.stringify(body) }),
 

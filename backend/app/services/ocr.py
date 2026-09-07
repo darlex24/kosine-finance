@@ -94,6 +94,9 @@ CATEGORY_SLUGS = [
 ]
 
 
+_SEEDED_ARM_VALUES = frozenset(a.value for a in GivingArm)
+
+
 def _decimal(value) -> Decimal | None:
     if value is None:
         return None
@@ -133,13 +136,20 @@ async def extract(image_bytes: bytes, mime_type: str, settings: Settings) -> Ocr
     return _to_result(raw)
 
 
-def _coerce_arm(value: str | None, fallback_text: str = "") -> GivingArm | None:
+def _coerce_arm(value: str | None, fallback_text: str = "") -> str | None:
+    """Map the model's answer onto a seeded arm slug, or None.
+
+    Only seeded arms are matched here. A user's own arms are not offered to the
+    model — the picker is where those get chosen, and guessing at another
+    church's vocabulary from a receipt would be worse than leaving it blank.
+    """
     if value:
         try:
-            return GivingArm(value)
+            return GivingArm(value).value
         except ValueError:
             pass
-    return classify_text(f"{value or ''} {fallback_text}") or None
+    matched = classify_text(f"{value or ''} {fallback_text}")
+    return matched.value if matched is not None else None
 
 
 def _to_result(raw: dict) -> OcrResult:
@@ -168,8 +178,11 @@ def _to_result(raw: dict) -> OcrResult:
     # Authoritative CRA decision, made locally rather than trusted from the model.
     deductible = False
     note = raw.get("notes")
-    if arm is not None:
-        rule = ARM_RULES[arm]
+    # `arm` is a slug now, and _coerce_arm only ever returns a seeded one — but
+    # look it up defensively rather than indexing, so a future change that lets
+    # custom arms through here degrades to "not receiptable" instead of raising.
+    rule = ARM_RULES.get(GivingArm(arm)) if arm in _SEEDED_ARM_VALUES else None
+    if rule is not None:
         deductible = rule.default_tax_deductible and not (
             rule.requires_registered_charity and bn is None
         )
@@ -189,7 +202,7 @@ def _to_result(raw: dict) -> OcrResult:
     if slug not in CATEGORY_SLUGS:
         slug = None
     if slug is None and arm is not None:
-        slug = "giving_tithe" if arm.value == "tithe" else "giving_offering"
+        slug = "giving_tithe" if arm == "tithe" else "giving_offering"
 
     currency = (raw.get("currency") or "").strip().upper() or None
 

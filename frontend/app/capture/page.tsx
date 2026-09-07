@@ -41,7 +41,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 let seq = 0;
 
 export default function CapturePage() {
-  const { categories, currencies, baseCurrency, invalidate, ready } = useCatalog();
+  const { categories, currencies, baseCurrency, invalidate, ready, arms } = useCatalog();
   const [items, setItems] = useState<Item[]>([]);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
@@ -371,7 +371,7 @@ export default function CapturePage() {
                           aria-label="Giving arm"
                         >
                           <option value="">Giving arm — not assigned</option>
-                          {GIVING_ARMS.map((arm) => (
+                          {(arms.length > 0 ? arms : GIVING_ARMS).map((arm) => (
                             <option key={arm.arm} value={arm.arm}>
                               {arm.display_name}
                             </option>

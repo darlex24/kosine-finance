@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useCatalog } from "@/components/CatalogProvider";
 import { Button, Field, Pill, Sheet } from "@/components/ui";
 import { GIVING_ARMS, REALM_LABELS, type Realm } from "@/lib/givingArms";
 import { formatAbs, formatMoney } from "@/lib/money";
@@ -21,11 +22,13 @@ export function RowDetailSheet({
   onEdit: (id: string, patch: Partial<LedgerDraft>) => Promise<unknown>;
   onDelete: (id: string) => void;
 }) {
+  const { arms } = useCatalog();
+  const allArms = arms.length > 0 ? arms : GIVING_ARMS;
   const [busy, setBusy] = useState(false);
   if (!row) return null;
 
   const isGiving = row.entry_type === "giving";
-  const arm = GIVING_ARMS.find((a) => a.arm === row.giving_arm);
+  const arm = allArms.find((a) => a.arm === row.giving_arm);
 
   const patch = async (body: Partial<LedgerDraft>) => {
     setBusy(true);
@@ -106,7 +109,7 @@ export function RowDetailSheet({
                 onChange={(e) => void patch({ giving_arm: e.target.value || null })}
               >
                 <option value="">Not assigned</option>
-                {GIVING_ARMS.map((option) => (
+                {allArms.map((option) => (
                   <option key={option.arm} value={option.arm}>
                     {option.display_name}
                   </option>

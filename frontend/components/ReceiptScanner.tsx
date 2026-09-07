@@ -21,7 +21,7 @@ export function ReceiptScanner({
 }: {
   onCommitted?: (row: LedgerRow) => void;
 }) {
-  const { categories, baseCurrency, currencies } = useCatalog();
+  const { categories, baseCurrency, currencies, arms } = useCatalog();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<OcrResult | null>(null);
   const [busy, setBusy] = useState<"scan" | "commit" | null>(null);
@@ -230,7 +230,7 @@ export function ReceiptScanner({
                 onChange={(e) => setGivingArm(e.target.value)}
               >
                 <option value="">Not assigned</option>
-                {GIVING_ARMS.map((arm) => (
+                {(arms.length > 0 ? arms : GIVING_ARMS).map((arm) => (
                   <option key={arm.arm} value={arm.arm}>
                     {arm.display_name}
                   </option>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date as date_cls
 from decimal import Decimal
@@ -10,11 +11,42 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from ..config import Settings, get_settings
 from ..deps import CurrentUser, get_current_user
-from ..giving import ARM_RULES, GivingArm, PledgeStatus, Realm, is_tax_deductible
-from ..schemas import ArmRuleOut, GivingIn, GivingOut, GivingSummary
+from ..giving import PledgeStatus
+from ..schemas import ArmRuleIn, ArmRuleOut, GivingIn, GivingOut, GivingSummary
 from .ledger import _price_row
 
 router = APIRouter()
+
+
+def _rule_for(user: CurrentUser, arm: str) -> dict:
+    """The rule governing an arm: the user's own definition, else the seeded one.
+
+    Since 0011 the catalogue is per-user, so this cannot be a dict lookup on the
+    Python ARM_RULES table any more — that only knows the seeded arms.
+    """
+    rows = (
+        user.client.table("giving_arm_rules")
+        .select("*")
+        .eq("giving_arm", arm)
+        .order("user_id", desc=True, nullsfirst=False)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+    if not rows:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Unknown giving arm '{arm}'. Create it first, or pick a seeded one.",
+        )
+    return rows[0]
+
+
+def _deductible(rule: dict, charity_registration_number: str | None) -> bool:
+    """Same rule the database trigger applies, kept in step deliberately."""
+    if rule["requires_registered_charity"] and not (charity_registration_number or "").strip():
+        return False
+    return bool(rule["default_tax_deductible"])
 
 
 def _giving_category_id(user: CurrentUser) -> str | None:
@@ -31,25 +63,88 @@ def _giving_category_id(user: CurrentUser) -> str | None:
     return rows[0]["id"] if rows else None
 
 # CRA federal charitable donation tax credit, 2026 rates.
+SEEDED_REALMS = (
+    "core_covenant",
+    "ministry_partnership",
+    "seeds_special",
+    "alms_compassion",
+)
+
 FIRST_TIER_CAP = Decimal("200")
 FIRST_TIER_RATE = Decimal("0.15")
 SECOND_TIER_RATE = Decimal("0.29")
 
 
 @router.get("/giving/arms", response_model=list[ArmRuleOut])
-def list_arms():
-    """The full catalogue of giving arms, grouped client-side by realm."""
+def list_arms(user: CurrentUser = Depends(get_current_user)):
+    """The catalogue: seeded arms plus any this user has defined.
+
+    Read from the database rather than the Python ARM_RULES table, because since
+    0011 the seeded arms are only part of the picture — a church outside
+    Loveworld defines its own and they have to appear here.
+    """
+    rows = (
+        user.client.table("giving_arm_rules")
+        .select("*")
+        .order("sort_order")
+        .order("display_name")
+        .execute()
+        .data
+        or []
+    )
     return [
         ArmRuleOut(
-            arm=rule.arm,
-            realm=rule.realm,
-            display_name=rule.display_name,
-            default_tax_deductible=rule.default_tax_deductible,
-            requires_registered_charity=rule.requires_registered_charity,
-            cra_note=rule.cra_note,
+            arm=row["giving_arm"],
+            realm=row["realm"],
+            display_name=row["display_name"],
+            default_tax_deductible=row["default_tax_deductible"],
+            requires_registered_charity=row["requires_registered_charity"],
+            cra_note=row.get("cra_note"),
+            is_system=row.get("is_system", True),
+            sort_order=row.get("sort_order", 0),
         )
-        for rule in ARM_RULES.values()
+        for row in rows
     ]
+
+
+@router.post("/giving/arms", response_model=ArmRuleOut, status_code=201)
+def create_arm(payload: ArmRuleIn, user: CurrentUser = Depends(get_current_user)):
+    """Define a giving arm for your own church."""
+    slug = re.sub(r"[^a-z0-9]+", "_", payload.display_name.strip().lower()).strip("_")
+    if not slug:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Name it something.")
+
+    body = {
+        "giving_arm": f"custom_{user.id[:8]}_{slug}",
+        "realm": payload.realm,
+        "display_name": payload.display_name.strip(),
+        "default_tax_deductible": payload.default_tax_deductible,
+        "requires_registered_charity": payload.requires_registered_charity,
+        "cra_note": payload.note,
+        "is_system": False,
+        "user_id": user.id,
+        "sort_order": 500,
+    }
+    result = user.client.table("giving_arm_rules").insert(body).execute()
+    if not result.data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Could not create that arm")
+    row = result.data[0]
+    return ArmRuleOut(
+        arm=row["giving_arm"],
+        realm=row["realm"],
+        display_name=row["display_name"],
+        default_tax_deductible=row["default_tax_deductible"],
+        requires_registered_charity=row["requires_registered_charity"],
+        cra_note=row.get("cra_note"),
+        is_system=False,
+        sort_order=row.get("sort_order", 500),
+    )
+
+
+@router.delete("/giving/arms/{arm_id}", status_code=204)
+def delete_arm(arm_id: str, user: CurrentUser = Depends(get_current_user)):
+    """RLS restricts this to the user's own non-system arms."""
+    user.client.table("giving_arm_rules").delete().eq("id", arm_id).execute()
 
 
 @router.post("/giving", response_model=GivingOut, status_code=201)
@@ -63,7 +158,7 @@ def record_giving(payload: GivingIn, user: CurrentUser = Depends(get_current_use
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "Provide either transaction_id or amount",
             )
-        rule = ARM_RULES[payload.giving_arm]
+        rule = _rule_for(user, payload.giving_arm)
         given_on = payload.date or date_cls.today()
         body = {
             "user_id": user.id,
@@ -77,7 +172,7 @@ def record_giving(payload: GivingIn, user: CurrentUser = Depends(get_current_use
             "entry_type": "giving",
             "date": given_on.isoformat(),
             "merchant": payload.recipient,
-            "memo": rule.display_name,
+            "memo": rule["display_name"],
             "receipt_image_url": payload.receipt_image_url,
         }
         # Fills base_currency / base_amount / fx_rate, which 0003 makes NOT NULL.
@@ -102,16 +197,16 @@ def record_giving(payload: GivingIn, user: CurrentUser = Depends(get_current_use
     record = {
         "user_id": user.id,
         "transaction_id": transaction_id,
-        "giving_arm": payload.giving_arm.value,
-        "realm": ARM_RULES[payload.giving_arm].realm.value,
+        "giving_arm": payload.giving_arm,
+        "realm": _rule_for(user, payload.giving_arm)["realm"],
         "recipient": payload.recipient,
         "charity_registration_number": payload.charity_registration_number,
         "pledge_fulfilled_status": payload.pledge_fulfilled_status.value,
         "pledge_total": float(payload.pledge_total) if payload.pledge_total else None,
-        # The DB trigger recomputes this; we send our own value so the API is
-        # correct even when called against a database without the trigger.
-        "tax_deductible_flag": is_tax_deductible(
-            payload.giving_arm, payload.charity_registration_number
+        # The DB trigger recomputes this from the arm's rule; we send our own
+        # value so the API is correct even against a database without it.
+        "tax_deductible_flag": _deductible(
+            _rule_for(user, payload.giving_arm), payload.charity_registration_number
         ),
         "tax_year": tax_year,
     }
@@ -124,14 +219,14 @@ def record_giving(payload: GivingIn, user: CurrentUser = Depends(get_current_use
 @router.get("/giving", response_model=list[GivingOut])
 def list_giving(
     tax_year: int | None = None,
-    giving_arm: GivingArm | None = None,
+    giving_arm: str | None = None,
     user: CurrentUser = Depends(get_current_user),
 ):
     query = user.client.table("kingdom_giving_records").select("*")
     if tax_year:
         query = query.eq("tax_year", tax_year)
     if giving_arm:
-        query = query.eq("giving_arm", giving_arm.value)
+        query = query.eq("giving_arm", giving_arm)
     return query.order("created_at", desc=True).execute().data or []
 
 
@@ -205,7 +300,10 @@ def giving_summary(
         receiptable_total=receiptable,
         non_receiptable_total=non_receiptable,
         by_arm=dict(by_arm),
-        by_realm={realm.value: by_realm.get(realm.value, Decimal("0")) for realm in Realm},
+        # The four seeded realms always appear so the dashboard keeps a stable
+        # shape, plus any others a custom arm introduced.
+        by_realm={realm: by_realm.get(realm, Decimal("0")) for realm in SEEDED_REALMS}
+        | {k: v for k, v in by_realm.items() if k not in SEEDED_REALMS},
         estimated_federal_credit=_federal_credit(receiptable),
         outstanding_pledges=outstanding,
     )
