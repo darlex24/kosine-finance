@@ -189,7 +189,7 @@ export default function ExpensesPage() {
         </Card>
 
         <Card>
-          <SectionHeading title="Across the year" hint={`Monthly outflow by type, ${year}`} />
+          <SectionHeading title="Across the year" hint={`Monthly outflow by type, ${year} · ${baseCurrency}`} />
           <OutflowTrend points={flow} currency={baseCurrency} />
         </Card>
 

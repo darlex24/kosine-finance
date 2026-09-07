@@ -48,6 +48,14 @@ export default function BudgetPage() {
             .map((l) => [l.category_id as string, String(l.allocated)]),
         ),
       );
+      // Open the first group on arrival. Everything collapsed meant the
+      // allocation inputs were invisible, and nothing on screen said they
+      // existed at all.
+      setOpen((current) => {
+        if (current.size > 0) return current;
+        const first = month_.lines[0]?.category_group;
+        return first ? new Set([first]) : current;
+      });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load this month");
@@ -209,7 +217,21 @@ export default function BudgetPage() {
         <section className="space-y-2">
           <SectionHeading
             title="Envelopes"
-            hint="Set a planned amount per category; the bar shows what you have used"
+            hint="Open a group, type a planned amount beside any category, then Save budget"
+            action={
+              <Button
+                variant="quiet"
+                onClick={() =>
+                  setOpen(
+                    open.size === groups.length
+                      ? new Set()
+                      : new Set(groups.map((g) => g.name)),
+                  )
+                }
+              >
+                {open.size === groups.length ? "Collapse all" : "Expand all"}
+              </Button>
+            }
           />
           {groups.map((group) => {
             const expanded = open.has(group.name);
@@ -240,6 +262,10 @@ export default function BudgetPage() {
                         <span className="text-navy-300"> / {money(group.allocated)}</span>
                       </span>
                     </span>
+                    <span className="mt-1 block text-[11px] text-navy-300">
+                      {group.lines.filter((l) => Number(l.allocated) > 0).length} of{" "}
+                      {group.lines.length} budgeted
+                    </span>
                     <span className="mt-1.5 block h-1.5 rounded-full bg-white/5">
                       <span
                         className="block h-1.5 rounded-full"
@@ -258,6 +284,12 @@ export default function BudgetPage() {
 
                 {expanded && (
                   <ul className="border-t border-white/5 bg-navy-950/40 px-5 py-2">
+                    <li className="flex flex-wrap items-center gap-3 border-b border-white/10 pb-1.5 text-[10px] uppercase tracking-[0.14em] text-navy-300">
+                      <span className="min-w-[9rem] flex-1">Category</span>
+                      <span className="w-28 shrink-0">Used</span>
+                      <span className="w-24 shrink-0 text-right">Spent</span>
+                      <span className="w-24 shrink-0 text-right">Planned</span>
+                    </li>
                     {group.lines.map((line) => (
                       <BudgetRow
                         key={line.category_id ?? line.category_name}

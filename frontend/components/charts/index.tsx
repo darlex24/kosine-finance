@@ -25,6 +25,7 @@ import {
   SERIES_LABEL,
   SURFACE,
   rampColor,
+  rampSpread,
 } from "@/lib/chartTheme";
 import { formatMoney } from "@/lib/money";
 import type { CashFlowPoint, CategorySpend, GivingByArm } from "@/lib/types";
@@ -118,8 +119,9 @@ export function OutflowDonut({
     const merged: [string, number][] = tail.length
       ? [...head, ["Other", tail.reduce((s, [, v]) => s + v, 0)]]
       : head;
+    const fills = rampSpread(merged.length);
     return {
-      slices: merged.map(([name, value], i) => ({ name, value, fill: rampColor(i) })),
+      slices: merged.map(([name, value], i) => ({ name, value, fill: fills[i] })),
       total: sorted.reduce((s, [, v]) => s + v, 0),
     };
   }, [rows]);
@@ -134,7 +136,7 @@ export function OutflowDonut({
             data={slices}
             dataKey="value"
             nameKey="name"
-            innerRadius="58%"
+            innerRadius="66%"
             outerRadius="88%"
             paddingAngle={1.5}
             stroke={SURFACE}
@@ -157,11 +159,22 @@ export function OutflowDonut({
         </PieChart>
       </ResponsiveContainer>
 
-      {/* The hero number belongs in the hole — it is what the donut is answering. */}
+      {/* The hero number belongs in the hole — it is what the donut is answering.
+          Sized down and compacted past six figures so it stays inside the ring:
+          a number that overflows its own hole is worse than one that is smaller.
+          Solid gold rather than the sheen gradient, which clips unevenly across
+          short text and reads as two different colours. */}
       <div className="pointer-events-none absolute inset-0 grid place-items-center">
-        <div className="text-center">
+        <div className="max-w-[42%] text-center">
           <p className="label">Total out</p>
-          <p className="figure gold-text">{money(total, currency)}</p>
+          <p
+            className={cx(
+              "font-semibold leading-tight tabular-nums tracking-tight text-gold-300",
+              total >= 1_000_000 ? "text-lg" : "text-xl",
+            )}
+          >
+            {formatMoney(total, currency, { whole: true, compact: total >= 100_000 })}
+          </p>
         </div>
       </div>
 
@@ -236,9 +249,14 @@ export function OutflowTrend({
           tick={{ fill: AXIS, fontSize: 11 }}
           axisLine={false}
           tickLine={false}
-          width={64}
+          width={52}
+          // Bare numbers: repeating the currency on every tick is noise, and the
+          // card's own heading already says which currency this is.
           tickFormatter={(v: number) =>
-            formatMoney(v, currency, { whole: true, compact: true })
+            new Intl.NumberFormat(undefined, {
+              notation: "compact",
+              maximumFractionDigits: 1,
+            }).format(v)
           }
         />
         <Tooltip content={<ChartTooltip currency={currency} />} />

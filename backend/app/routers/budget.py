@@ -52,11 +52,18 @@ def get_budget(
         .eq("month", month)
         .execute()
     )
+    # Every leaf category, not just the ones with spend or an existing
+    # allocation. A budget is a plan for money you have not spent yet, so a
+    # category you have never used is exactly the one you most need to be able
+    # to budget for.
     categories = {
         c["id"]: c
         for c in _rows(
-            user.client.table("expense_categories").select("id, name, \"group\"").execute()
+            user.client.table("expense_categories")
+            .select("id, name, \"group\", parent_id, sort_order")
+            .execute()
         )
+        if c.get("parent_id") is not None
     }
     budget_rows = _rows(
         user.client.table("monthly_budgets")
@@ -71,14 +78,24 @@ def get_budget(
         for a in allocations
     }
 
-    lines: dict[str, BudgetLine] = {}
+    # Start from the full catalogue so every category is budgetable.
+    lines: dict[str, BudgetLine] = {
+        cid: BudgetLine(
+            category_id=cid,
+            category_name=c["name"],
+            category_group=c.get("group") or "Other",
+            allocated=planned.get(cid, Decimal("0")),
+            actual=Decimal("0"),
+        )
+        for cid, c in categories.items()
+    }
 
-    # Actuals first — they carry the names and can include categories that were
-    # never budgeted, which is exactly what a user needs to see.
+    # Then overlay actuals, which may also cover categories outside the
+    # catalogue — uncategorised spend has to show somewhere.
     for row in actuals:
         key = row["category_id"] or UNCATEGORISED
-        line = lines.get(key)
         amount = Decimal(str(row["total"] or 0))
+        line = lines.get(key)
         if line is None:
             lines[key] = BudgetLine(
                 category_id=row["category_id"],
@@ -94,7 +111,8 @@ def get_budget(
             line.actual += amount
             line.entry_count += row.get("entry_count") or 0
 
-    # Then anything budgeted but not yet spent, so an untouched envelope still shows.
+    # Finally, any allocation whose category has since been deleted, so a
+    # budgeted amount never silently disappears from the totals.
     for key, amount in planned.items():
         if key in lines:
             continue
@@ -116,7 +134,13 @@ def get_budget(
         )
 
     ordered = sorted(
-        lines.values(), key=lambda l: (l.category_group, -float(l.actual), l.category_name)
+        lines.values(),
+        key=lambda l: (
+            l.category_group,
+            -float(l.actual),
+            -float(l.allocated),
+            l.category_name,
+        ),
     )
     total_allocated = sum((l.allocated for l in ordered), Decimal("0"))
     total_actual = sum((l.actual for l in ordered), Decimal("0"))

@@ -70,6 +70,23 @@ export function rampColor(index: number): string {
   return index < GOLD_RAMP.length ? GOLD_RAMP[index] : OTHER_COLOR;
 }
 
+/** Ramp steps spread across however many slices there actually are.
+ *
+ * Taking the first N steps means two slices get two adjacent steps, which are
+ * only one lightness apart and read as the same colour. Spreading uses the full
+ * light-to-dark range whatever the count, so separation stays legible.
+ */
+export function rampSpread(count: number): string[] {
+  if (count <= 0) return [];
+  if (count === 1) return [GOLD_RAMP[2]];
+  const last = GOLD_RAMP.length - 1;
+  return Array.from({ length: count }, (_, i) =>
+    count > GOLD_RAMP.length
+      ? rampColor(i)
+      : GOLD_RAMP[Math.round((i / (count - 1)) * last)],
+  );
+}
+
 // Recessive grid and axes: present enough to read against, never competing with
 // the data.
 export const AXIS = "#8fa3c8";
