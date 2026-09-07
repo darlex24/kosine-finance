@@ -6,7 +6,17 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
-from .giving import GivingArm, PledgeStatus, Realm
+from .giving import PledgeStatus
+
+# A giving-arm slug, and the realm it belongs to.
+#
+# These were closed enums until 0011. They are plain strings at the API boundary
+# now because users define their own arms — the authoritative list lives in
+# `giving_arm_rules`, and the database trigger rejects a slug with no rule, so
+# validation happens where the catalogue actually is rather than in a type that
+# can only ever know the seeded values.
+GivingArmSlug = str
+RealmSlug = str
 
 
 class MinistryRole(str, Enum):
@@ -86,7 +96,7 @@ class GivingIn(BaseModel):
     date: DateType | None = None
     account_id: str | None = None
 
-    giving_arm: GivingArm
+    giving_arm: GivingArmSlug
     recipient: str | None = None
     charity_registration_number: str | None = None
     pledge_fulfilled_status: PledgeStatus = PledgeStatus.NOT_APPLICABLE
@@ -97,8 +107,8 @@ class GivingIn(BaseModel):
 class GivingOut(BaseModel):
     id: str
     transaction_id: str
-    giving_arm: GivingArm
-    realm: Realm
+    giving_arm: GivingArmSlug
+    realm: RealmSlug
     recipient: str | None
     charity_registration_number: str | None
     pledge_fulfilled_status: PledgeStatus
@@ -109,12 +119,27 @@ class GivingOut(BaseModel):
 
 
 class ArmRuleOut(BaseModel):
-    arm: GivingArm
-    realm: Realm
+    arm: GivingArmSlug
+    realm: RealmSlug
     display_name: str
     default_tax_deductible: bool
     requires_registered_charity: bool
-    cra_note: str | None
+    cra_note: str | None = None
+    is_system: bool = True
+    sort_order: int = 0
+
+
+class ArmRuleIn(BaseModel):
+    """A giving arm the user defines for their own church."""
+
+    display_name: str = Field(min_length=1, max_length=80)
+    realm: RealmSlug = "core_covenant"
+    # Whether a gift on this arm can produce an official donation receipt. The
+    # database trigger still overrides this to false when the arm requires a
+    # registered charity and no registration number was recorded.
+    default_tax_deductible: bool = True
+    requires_registered_charity: bool = True
+    note: str | None = None
 
 
 class GivingSummary(BaseModel):
@@ -133,7 +158,7 @@ class GivingSummary(BaseModel):
 class OcrLineItem(BaseModel):
     description: str
     amount: Decimal
-    suggested_giving_arm: GivingArm | None = None
+    suggested_giving_arm: GivingArmSlug | None = None
 
 
 class OcrResult(BaseModel):
@@ -146,7 +171,7 @@ class OcrResult(BaseModel):
     line_items: list[OcrLineItem] = []
     suggested_category: str | None = None
     suggested_category_slug: str | None = None
-    suggested_giving_arm: GivingArm | None = None
+    suggested_giving_arm: GivingArmSlug | None = None
     tax_deductible_flag: bool = False
     confidence: float = 0.0
     notes: str | None = None
@@ -369,7 +394,7 @@ class LedgerRowIn(BaseModel):
     ocr_confidence: float | None = None
 
     # Present only for entry_type = giving; upserts kingdom_giving_records.
-    giving_arm: GivingArm | None = None
+    giving_arm: GivingArmSlug | None = None
     giving_recipient: str | None = None
     charity_registration_number: str | None = None
     pledge_fulfilled_status: PledgeStatus | None = None
@@ -391,7 +416,7 @@ class LedgerRowPatch(BaseModel):
     tags: list[str] | None = None
     receipt_image_url: str | None = None
 
-    giving_arm: GivingArm | None = None
+    giving_arm: GivingArmSlug | None = None
     giving_recipient: str | None = None
     charity_registration_number: str | None = None
     pledge_fulfilled_status: PledgeStatus | None = None
@@ -424,8 +449,8 @@ class LedgerRowOut(BaseModel):
     account_id: str | None = None
     account_name: str | None = None
     giving_record_id: str | None = None
-    giving_arm: GivingArm | None = None
-    giving_realm: Realm | None = None
+    giving_arm: GivingArmSlug | None = None
+    giving_realm: RealmSlug | None = None
     giving_recipient: str | None = None
     tax_deductible_flag: bool | None = None
     pledge_fulfilled_status: PledgeStatus | None = None

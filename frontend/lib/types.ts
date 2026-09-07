@@ -252,6 +252,19 @@ export type CategorySpend = {
   base_currency: string | null;
 };
 
+/** A giving arm as the API returns it. Since 0011 this is a per-user catalogue:
+ *  the seeded Loveworld arms plus whatever the user defined for their church. */
+export type ArmRule = {
+  arm: string;
+  realm: Realm;
+  display_name: string;
+  default_tax_deductible: boolean;
+  requires_registered_charity: boolean;
+  cra_note: string | null;
+  is_system: boolean;
+  sort_order: number;
+};
+
 export type Budget = {
   id: string;
   year: number;

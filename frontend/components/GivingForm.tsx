@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 
+import { useCatalog } from "@/components/CatalogProvider";
 import { api } from "@/lib/api";
 import {
   GIVING_ARMS,
@@ -13,8 +14,13 @@ import {
   type Realm,
 } from "@/lib/givingArms";
 
-/** Record a gift against any arm, with live CRA receiptability feedback. */
+/** Record a gift against any arm, with live receiptability feedback. */
 export function GivingForm({ onSaved }: { onSaved?: () => void }) {
+  // The catalogue, not the hardcoded list: it carries the seeded arms plus any
+  // this church defined for itself. GIVING_ARMS is only the pre-load fallback.
+  const { arms: catalogArms, refresh } = useCatalog();
+  const allArms = catalogArms.length > 0 ? catalogArms : GIVING_ARMS;
+
   const [realm, setRealm] = useState<Realm>("core_covenant");
   const [arm, setArm] = useState("tithe");
   const [amount, setAmount] = useState("");
@@ -23,18 +29,43 @@ export function GivingForm({ onSaved }: { onSaved?: () => void }) {
   const [pledgeStatus, setPledgeStatus] = useState("not_applicable");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newArmName, setNewArmName] = useState("");
+  const [addingArm, setAddingArm] = useState(false);
 
   const armsInRealm = useMemo(
-    () => GIVING_ARMS.filter((a) => a.realm === realm),
-    [realm],
+    () => allArms.filter((a) => a.realm === realm),
+    [allArms, realm],
   );
-  const selected = GIVING_ARMS.find((a) => a.arm === arm) ?? GIVING_ARMS[0];
+  const selected = allArms.find((a) => a.arm === arm) ?? allArms[0];
   const receiptable = isReceiptable(selected, charityNumber);
 
   function pickRealm(next: Realm) {
     setRealm(next);
-    const first = GIVING_ARMS.find((a) => a.realm === next);
+    const first = allArms.find((a) => a.realm === next);
     if (first) setArm(first.arm);
+  }
+
+  /** Define an arm this church uses that the seeded list does not name. */
+  async function addArm() {
+    const name = newArmName.trim();
+    if (!name) return;
+    setAddingArm(true);
+    setError(null);
+    try {
+      const created = await api.createArm({
+        display_name: name,
+        realm,
+        default_tax_deductible: true,
+        requires_registered_charity: true,
+      });
+      await refresh();
+      setArm(created.arm);
+      setNewArmName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add that arm");
+    } finally {
+      setAddingArm(false);
+    }
   }
 
   async function submit(event: React.FormEvent) {
@@ -99,6 +130,31 @@ export function GivingForm({ onSaved }: { onSaved?: () => void }) {
               {a.display_name}
             </motion.button>
           ))}
+
+          {/* Not every church calls its giving what Loveworld calls it. */}
+          <div className="col-span-full mt-1 flex gap-2">
+            <input
+              value={newArmName}
+              onChange={(e) => setNewArmName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void addArm();
+                }
+              }}
+              placeholder={`Add an arm to ${REALM_LABELS[realm]}…`}
+              aria-label="New giving arm name"
+              className="input flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => void addArm()}
+              disabled={!newArmName.trim() || addingArm}
+              className="btn-ghost shrink-0"
+            >
+              {addingArm ? "Adding…" : "Add"}
+            </button>
+          </div>
         </div>
       </div>
 
