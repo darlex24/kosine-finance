@@ -285,3 +285,87 @@ def test_scan_quota_blocks_past_the_ceiling():
 
     ocr_router._enforce_scan_quota("u2")  # per-user, not global
     ocr_router._scan_log.clear()
+
+
+# --------------------------------------------------------- budget envelopes
+
+def _line(allocated, actual):
+    """Apply the same derivation get_budget does, on one line."""
+    from app.schemas import BudgetLine
+
+    line = BudgetLine(
+        category_name="Groceries", category_group="Food",
+        allocated=Decimal(str(allocated)), actual=Decimal(str(actual)),
+    )
+    line.variance = line.allocated - line.actual
+    line.used_pct = (
+        float(line.actual / line.allocated * 100) if line.allocated > 0 else None
+    )
+    return line
+
+
+def test_under_budget_leaves_a_positive_variance():
+    line = _line(300, 220)
+    assert line.variance == Decimal("80")
+    assert line.used_pct == pytest.approx(73.33, abs=0.01)
+
+
+def test_over_budget_is_a_negative_variance():
+    """Overspend must read as negative, not as an absolute miss."""
+    line = _line(300, 340)
+    assert line.variance == Decimal("-40")
+    assert line.used_pct == pytest.approx(113.33, abs=0.01)
+
+
+def test_unbudgeted_spend_reports_no_percentage():
+    """Nothing budgeted is a different state from 0% used, and the two must not
+    render as the same bar."""
+    line = _line(0, 120)
+    assert line.used_pct is None
+    assert line.variance == Decimal("-120")
+
+
+def test_budgeted_but_unspent_is_zero_percent_not_none():
+    line = _line(300, 0)
+    assert line.used_pct == 0.0
+    assert line.variance == Decimal("300")
+
+
+# ------------------------------------------------------- account deletion
+
+class _FakeUser:
+    def __init__(self, email):
+        self.id = "user-1"
+        self.email = email
+        self.client = None
+
+
+def _delete_with(typed, account_email="owner@example.com"):
+    from app.routers.catalog import delete_account
+    from app.schemas import DeleteAccountIn
+
+    return delete_account(
+        DeleteAccountIn(confirm_email=typed),
+        user=_FakeUser(account_email),
+        settings=None,
+        service=None,
+    )
+
+
+@pytest.mark.parametrize("typed", ["", "   ", "someone@else.com", "owner@example.co"])
+def test_delete_refuses_without_the_right_email(typed):
+    """Nothing destructive may run before the confirmation matches."""
+    with pytest.raises(HTTPException) as err:
+        _delete_with(typed)
+    assert err.value.status_code == 400
+
+
+def test_delete_confirmation_ignores_case_and_padding():
+    """It gets typed by hand; a stray space should not block a real intent.
+
+    This still fails at the storage step because the fakes are None — which is
+    the point: it proves the guard let a correct email through.
+    """
+    with pytest.raises(HTTPException) as err:
+        _delete_with("  Owner@Example.COM  ")
+    assert err.value.status_code != 400

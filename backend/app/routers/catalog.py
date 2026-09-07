@@ -7,17 +7,20 @@ these handlers stay thin.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
+from ..config import Settings, get_settings
 from ..deps import CurrentUser, get_current_user, get_service_client
 from ..schemas import (
     CategoryIn,
     CategoryOut,
     CurrencyOut,
+    DeleteAccountIn,
     FxRefreshOut,
     PlatformIn,
     PlatformOut,
@@ -27,6 +30,7 @@ from ..schemas import (
 from ..services import fx
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _rows(response):
@@ -161,3 +165,59 @@ def create_platform(payload: PlatformIn, user: CurrentUser = Depends(get_current
 @router.delete("/platforms/{platform_id}", status_code=204)
 def delete_platform(platform_id: str, user: CurrentUser = Depends(get_current_user)):
     user.client.table("investment_platforms").delete().eq("id", platform_id).execute()
+
+
+@router.delete("/me", status_code=204)
+def delete_account(
+    payload: DeleteAccountIn,
+    user: CurrentUser = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+    service: Client = Depends(get_service_client),
+):
+    """Permanently delete the account and everything in it.
+
+    Asks for the email back because this cannot be undone. The comparison is
+    against the email on the caller's own verified token, never against a value
+    from the request body, so confirming someone else's address proves nothing.
+    """
+    typed = (payload.confirm_email or "").strip().lower()
+    if not typed or typed != (user.email or "").strip().lower():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Type the email address on this account to confirm deletion.",
+        )
+
+    # Receipts first. No foreign key covers Storage, so deleting the auth user
+    # would orphan every uploaded image with nothing left pointing at it. Doing
+    # this first means a storage failure leaves the account intact and
+    # retryable; the reverse order would leave unreachable files forever.
+    try:
+        bucket = service.storage.from_(settings.supabase_receipt_bucket)
+        paths = [
+            f"{user.id}/{obj['name']}"
+            for obj in (bucket.list(user.id) or [])
+            if obj.get("name")
+        ]
+        if paths:
+            bucket.remove(paths)
+            logger.info("Removed %d receipt objects for %s", len(paths), user.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not clear receipts for %s: %s", user.id, exc)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not delete your stored receipts, so the account was left intact. "
+            "Try again in a moment.",
+        ) from exc
+
+    # Deleting the auth user cascades public.users and every owned table:
+    # accounts, transactions, kingdom_giving_records, assets, liabilities,
+    # net_worth_snapshots, monthly_budgets, budget_allocations, and the user's
+    # own categories, platforms and giving arms. Seeded reference data is
+    # untouched by design.
+    try:
+        service.auth.admin.delete_user(user.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Account deletion failed for %s: %s", user.id, exc)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "Could not delete the account. Nothing was lost."
+        ) from exc

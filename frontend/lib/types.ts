@@ -284,3 +284,41 @@ export type Account = {
   balance: number;
   currency: string;
 };
+
+export type GivingByArm = {
+  year: number;
+  month: number;
+  giving_arm: string;
+  display_name: string;
+  realm: Realm;
+  is_system: boolean;
+  base_currency: string;
+  total: number;
+  entry_count: number;
+  any_receiptable: boolean;
+};
+
+export type BudgetLine = {
+  category_id: string | null;
+  category_name: string;
+  category_group: string;
+  entry_type: LedgerEntryType | null;
+  allocated: number;
+  actual: number;
+  /** allocated - actual. Negative means overspent. */
+  variance: number;
+  /** null when nothing was budgeted — a different state from 0% used. */
+  used_pct: number | null;
+  entry_count: number;
+};
+
+export type BudgetMonth = {
+  year: number;
+  month: number;
+  base_currency: string;
+  total_income: number;
+  total_allocated: number;
+  total_actual: number;
+  unallocated: number;
+  lines: BudgetLine[];
+};

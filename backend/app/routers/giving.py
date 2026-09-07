@@ -12,7 +12,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ..config import Settings, get_settings
 from ..deps import CurrentUser, get_current_user
 from ..giving import PledgeStatus
-from ..schemas import ArmRuleIn, ArmRuleOut, GivingIn, GivingOut, GivingSummary
+from ..schemas import (
+    ArmRuleIn,
+    ArmRuleOut,
+    GivingByArm,
+    GivingIn,
+    GivingOut,
+    GivingSummary,
+)
 from .ledger import _price_row
 
 router = APIRouter()
@@ -307,3 +314,19 @@ def giving_summary(
         estimated_federal_credit=_federal_credit(receiptable),
         outstanding_pledges=outstanding,
     )
+
+
+@router.get("/giving/by-arm", response_model=list[GivingByArm])
+def giving_by_arm(
+    year: int | None = None, user: CurrentUser = Depends(get_current_user)
+):
+    """Monthly giving per arm, for the breakdown chart.
+
+    /giving/summary gives a year total per arm with no trend, and v_category_spend
+    only knows the generic "Giving & Charity" group. This reads v_giving_by_arm,
+    which joins the arm catalogue so custom arms appear by their display name.
+    """
+    query = user.client.table("v_giving_by_arm").select("*")
+    if year:
+        query = query.eq("year", year)
+    return query.order("year").order("month").order("total", desc=True).execute().data or []

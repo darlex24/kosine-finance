@@ -7,10 +7,12 @@ import type {
   ArmRule,
   Asset,
   Budget,
+  BudgetMonth,
   CashFlowPoint,
   Category,
   CategorySpend,
   Currency,
+  GivingByArm,
   LedgerDraft,
   LedgerFilters,
   LedgerPage,
@@ -169,12 +171,41 @@ export const api = {
   accounts: () => request<Account[]>("/api/accounts"),
 
   budgets: (year?: number) => request<Budget[]>(`/api/budgets${qs({ year })}`),
+
+  // Envelope budgeting (0012): planned per category, against actuals.
+  budgetMonth: (year: number, month: number) =>
+    request<BudgetMonth>(`/api/budget${qs({ year, month })}`),
+  saveAllocations: (
+    year: number,
+    month: number,
+    allocations: { category_id: string; allocated: number }[],
+  ) =>
+    request<BudgetMonth>("/api/budget/allocations", {
+      method: "PUT",
+      body: JSON.stringify({ year, month, allocations }),
+    }),
+  copyBudgetForward: (from: { year: number; month: number }, to: { year: number; month: number }) =>
+    request<BudgetMonth>(
+      `/api/budget/copy-from${qs({
+        from_year: from.year, from_month: from.month,
+        to_year: to.year, to_month: to.month,
+      })}`,
+      { method: "POST" },
+    ),
+
+  deleteAccount: (confirmEmail: string) =>
+    request<void>("/api/me", {
+      method: "DELETE",
+      body: JSON.stringify({ confirm_email: confirmEmail }),
+    }),
   saveBudget: (body: Omit<Budget, "id">) =>
     request<Budget>("/api/budgets", { method: "PUT", body: JSON.stringify(body) }),
 
   givingSummary: (year?: number) =>
     request<GivingSummary>(`/api/giving/summary${qs({ tax_year: year })}`),
   arms: () => request<ArmRule[]>("/api/giving/arms"),
+  givingByArm: (year?: number) =>
+    request<GivingByArm[]>(`/api/giving/by-arm${qs({ year })}`),
   createArm: (body: {
     display_name: string;
     realm: string;
