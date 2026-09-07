@@ -535,3 +535,65 @@ class OcrCommitIn(BaseModel):
 
     row: LedgerRowIn
     ocr_raw: dict | None = None
+
+
+# --------------------------------------------------- V2: envelope budgeting
+
+class BudgetAllocationIn(BaseModel):
+    category_id: str
+    allocated: Decimal = Decimal("0")
+
+
+class BudgetAllocationsIn(BaseModel):
+    """A month's envelopes, saved as one unit rather than a request per row."""
+
+    year: int = Field(ge=2000, le=2100)
+    month: int = Field(ge=1, le=12)
+    allocations: list[BudgetAllocationIn] = []
+
+
+class BudgetLine(BaseModel):
+    """One category: what was planned against what actually happened."""
+
+    category_id: str | None = None
+    category_name: str
+    category_group: str
+    entry_type: LedgerEntryType | None = None
+    allocated: Decimal = Decimal("0")
+    actual: Decimal = Decimal("0")
+    # allocated - actual. Negative means overspent.
+    variance: Decimal = Decimal("0")
+    # actual as a percentage of allocated; None when nothing was budgeted, which
+    # is different from 0% and must not render as a full or empty bar.
+    used_pct: float | None = None
+    entry_count: int = 0
+
+
+class BudgetMonth(BaseModel):
+    year: int
+    month: int
+    base_currency: str
+    total_income: Decimal = Decimal("0")
+    total_allocated: Decimal = Decimal("0")
+    total_actual: Decimal = Decimal("0")
+    unallocated: Decimal = Decimal("0")
+    lines: list[BudgetLine] = []
+
+
+class GivingByArm(BaseModel):
+    year: int
+    month: int
+    giving_arm: str
+    display_name: str
+    realm: RealmSlug
+    is_system: bool = True
+    base_currency: str
+    total: Decimal
+    entry_count: int = 0
+    any_receiptable: bool = False
+
+
+class DeleteAccountIn(BaseModel):
+    """Deleting an account is irreversible, so it asks for the email back."""
+
+    confirm_email: str
