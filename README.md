@@ -125,6 +125,39 @@ before filing, and confirm any charity's registration number in the CRA charitie
 
 Estimates only; not tax advice.
 
+## Deploying
+
+The API ships as a container; the frontend goes to Vercel, which builds and
+serves Next far better than a container would.
+
+**Backend — Render** (`render.yaml` is a blueprint; the Dockerfile works on Fly,
+Railway or anything else that takes one):
+
+```bash
+docker build -t kosine-api ./backend
+```
+
+It listens on `0.0.0.0:$PORT`, runs as a non-root user, and has a `HEALTHCHECK`
+against `/health`. Keep `WEB_CONCURRENCY=1` until the rate limiter has a shared
+store — the limits are per-process and more workers silently multiply them.
+
+**Frontend — Vercel.** Point it at `frontend/`. The three `NEXT_PUBLIC_*` values
+are baked in at build time, so changing one needs a redeploy, not a restart.
+
+**Order matters:** deploy the API first, then set `NEXT_PUBLIC_API_URL` to its
+URL and deploy the frontend, then set `CORS_ORIGINS` to the frontend's URL and
+redeploy the API. Both halves need to know the other's address.
+
+`.env.production.example` lists every variable for both halves.
+
+### Startup refuses a broken config
+
+The API validates at import and dies rather than serving traffic with a hole in
+it. It will not start when `CORS_ORIGINS` is `*`, when Supabase keys are missing
+or still placeholders, or — with `ENVIRONMENT=production` — when `CORS_ORIGINS`
+points at localhost or a plaintext `http://` origin. A missing `OPENAI_API_KEY`
+is a warning, not a failure: only receipt scanning depends on it.
+
 ## Going live
 
 The app is safe by default in development and needs these before it faces the public.

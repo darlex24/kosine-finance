@@ -1,0 +1,4 @@
+# Everything in the runtime set, plus the test tooling. Not installed in
+# production: pytest has no business in a deployed image.
+-r requirements.txt
+pytest>=8.0

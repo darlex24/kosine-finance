@@ -4,5 +4,8 @@ node_modules/
 __pycache__/
 *.pyc
 .venv/
+# Every env file, however named, except the checked-in examples. The previous
+# two-line form would have let a .env.production through.
 .env
-.env.local
+.env.*
+!.env*.example

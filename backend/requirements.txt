@@ -1,9 +1,13 @@
-fastapi[standard]>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.8
-pydantic-settings>=2.4
-supabase>=2.7
-openai>=1.40
+# Runtime only. Pinned to lower bounds that are known to work together; the
+# deployed image should install from a lockfile or with --require-hashes if you
+# need byte-for-byte reproducibility.
+fastapi[standard]>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.8,<3.0
+pydantic-settings>=2.4,<3.0
+supabase>=2.7,<3.0
+openai>=1.40,<4.0
 python-multipart>=0.0.9
-httpx
-pytest>=8.0>=0.27
+httpx>=0.27,<1.0
+PyJWT>=2.8,<3.0
+cryptography>=42.0
