@@ -369,3 +369,41 @@ def test_delete_confirmation_ignores_case_and_padding():
     with pytest.raises(HTTPException) as err:
         _delete_with("  Owner@Example.COM  ")
     assert err.value.status_code != 400
+
+
+# ---------------------------------------------------------------- CORS
+
+def test_cors_allows_every_method_the_api_uses():
+    """A method missing from allow_methods fails silently in the worst way.
+
+    The browser blocks the preflight, fetch rejects with no status, and the
+    client surfaces it as "could not reach the API" — so a working endpoint
+    looks like a dead server. PUT was omitted once already.
+
+    Methods come from the OpenAPI schema rather than app.routes: this FastAPI
+    version holds included routers lazily, so `route.methods` is empty for them
+    and an earlier version of this test passed while PUT was genuinely missing.
+    """
+    from app.main import app
+
+    schema = app.openapi()
+    exposed = {
+        method.upper()
+        for operations in schema["paths"].values()
+        for method in operations
+        if method.upper() not in {"HEAD", "OPTIONS", "PARAMETERS"}
+    }
+    assert "PUT" in exposed, "sanity: the API does expose PUT somewhere"
+
+    allowed = None
+    for layer in app.user_middleware:
+        opts = getattr(layer, "kwargs", None) or getattr(layer, "options", {}) or {}
+        if "allow_methods" in opts:
+            allowed = {m.upper() for m in opts["allow_methods"]}
+            break
+
+    assert allowed is not None, "CORS middleware not configured"
+    if "*" in allowed:
+        return
+    missing = exposed - allowed
+    assert not missing, f"routes use {sorted(missing)} but CORS does not allow them"

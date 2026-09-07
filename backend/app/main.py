@@ -40,7 +40,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    # Must cover every method the routers actually expose. Omitting one does
+    # not fail loudly: the browser blocks the preflight, fetch rejects, and the
+    # client reports it as "could not reach the API". test_cors_allows_every
+    # _method_the_api_uses keeps this list honest.
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
