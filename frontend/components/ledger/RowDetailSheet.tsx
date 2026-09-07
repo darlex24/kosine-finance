@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useCatalog } from "@/components/CatalogProvider";
+import { api } from "@/lib/api";
 import { Button, Field, Pill, Sheet } from "@/components/ui";
 import { GIVING_ARMS, REALM_LABELS, type Realm } from "@/lib/givingArms";
 import { formatAbs, formatMoney } from "@/lib/money";
@@ -25,6 +26,7 @@ export function RowDetailSheet({
   const { arms } = useCatalog();
   const allArms = arms.length > 0 ? arms : GIVING_ARMS;
   const [busy, setBusy] = useState(false);
+  const [freshUrl, setFreshUrl] = useState<string | null>(null);
   if (!row) return null;
 
   const isGiving = row.entry_type === "giving";
@@ -68,9 +70,18 @@ export function RowDetailSheet({
             {/* Signed Supabase Storage URL; next/image would need a remote pattern. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={row.receipt_image_url}
+              src={freshUrl ?? row.receipt_image_url}
               alt={`Receipt for ${row.merchant ?? row.date}`}
               className="w-full rounded-xl border border-white/10"
+              // The stored link lasts an hour. If it has lapsed, ask for another
+              // rather than showing a broken image.
+              onError={() => {
+                if (freshUrl) return;
+                api
+                  .receiptUrl(row.id)
+                  .then((r) => setFreshUrl(r.url))
+                  .catch(() => undefined);
+              }}
             />
           </div>
         )}

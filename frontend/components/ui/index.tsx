@@ -247,7 +247,7 @@ export function Combobox({
       />
 
       {open && matches.length > 0 && (
-        <ul className="absolute z-30 mt-1 max-h-64 w-full min-w-[16rem] overflow-auto rounded-xl border border-white/10 bg-navy-900 p-1 shadow-card">
+        <ul className="absolute z-50 mt-1 max-h-64 w-full min-w-[16rem] overflow-auto rounded-xl border border-white/10 bg-navy-900 p-1 shadow-card">
           {matches.map((option, i) => (
             <li key={option.value}>
               <button

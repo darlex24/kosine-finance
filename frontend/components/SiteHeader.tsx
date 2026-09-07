@@ -16,6 +16,7 @@ const NAV = [
   { href: "/assets", label: "Assets" },
   { href: "/giving", label: "Giving" },
   { href: "/budget", label: "Budget" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export function SiteHeader() {

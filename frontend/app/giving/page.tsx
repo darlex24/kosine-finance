@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { GivingBreakdown } from "@/components/charts/GivingBreakdown";
 import { useCatalog } from "@/components/CatalogProvider";
 import { GivingForm } from "@/components/GivingForm";
 import { YearPicker, useYears } from "@/components/YearPicker";
@@ -14,12 +15,14 @@ export default function GivingPage() {
   const { years } = useYears();
   const [year, setYear] = useState(new Date().getFullYear());
   const [summary, setSummary] = useState<GivingSummary | null>(null);
+  const [byArm, setByArm] = useState<import("@/lib/types").GivingByArm[]>([]);
 
   // Totals arrive already converted into the user's base currency.
   const cad = (value: number) => formatMoney(value, baseCurrency, { whole: true });
 
   const load = useCallback(() => {
     api.givingSummary(year).then(setSummary).catch(() => setSummary(null));
+    api.givingByArm(year).then(setByArm).catch(() => setByArm([]));
   }, [year, dataVersion]);
 
   useEffect(load, [load]);
@@ -73,6 +76,11 @@ export default function GivingPage() {
                 </dd>
               </div>
             </dl>
+          </div>
+
+          <div className="card">
+            <p className="label mb-3">Where your giving went</p>
+            <GivingBreakdown rows={byArm} currency={baseCurrency} />
           </div>
 
           {REALM_ORDER.map((realm) => (

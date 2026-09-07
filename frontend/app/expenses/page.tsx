@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { CategoryTreemap, OutflowDonut, OutflowTrend } from "@/components/charts";
 import { useCatalog } from "@/components/CatalogProvider";
 import { Button, Card, SectionHeading, Skeleton, StatTile, cx } from "@/components/ui";
 import { YearPicker, useYears } from "@/components/YearPicker";
 import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
-import type { CategorySpend } from "@/lib/types";
+import type { CashFlowPoint, CategorySpend } from "@/lib/types";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -33,17 +34,20 @@ export default function ExpensesPage() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState<number | null>(null);
   const [rows, setRows] = useState<CategorySpend[]>([]);
+  const [flow, setFlow] = useState<CashFlowPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // Set by clicking a donut slice; narrows the list beneath it.
+  const [focusGroup, setFocusGroup] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ready) return;
     setLoading(true);
-    api
-      .categorySpend(year, month ?? undefined)
-      .then((data) => {
+    Promise.all([api.categorySpend(year, month ?? undefined), api.cashFlow(year)])
+      .then(([data, points]) => {
         setRows(data);
+        setFlow(points);
         setError(null);
       })
       .catch((err: unknown) =>
@@ -169,6 +173,35 @@ export default function ExpensesPage() {
         />
       </div>
 
+      {/* ---------------------------------------------------------- charts */}
+      <section className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <SectionHeading
+            title="Split by group"
+            hint="Click a slice to filter the breakdown below"
+          />
+          <OutflowDonut
+            rows={rows}
+            currency={baseCurrency}
+            selectedGroup={focusGroup}
+            onSelectGroup={setFocusGroup}
+          />
+        </Card>
+
+        <Card>
+          <SectionHeading title="Across the year" hint={`Monthly outflow by type, ${year} · ${baseCurrency}`} />
+          <OutflowTrend points={flow} currency={baseCurrency} />
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <SectionHeading
+            title="Every category, sized by spend"
+            hint="The biggest blocks are where the money actually goes"
+          />
+          <CategoryTreemap rows={rows} currency={baseCurrency} />
+        </Card>
+      </section>
+
       {/* ------------------------------------------------------- breakdown */}
       <section>
         <SectionHeading
@@ -195,7 +228,9 @@ export default function ExpensesPage() {
         )}
 
         <div className="space-y-2">
-          {groups.map((group) => {
+          {groups
+            .filter((g) => !focusGroup || g.name === focusGroup)
+            .map((group) => {
             const expanded = open.has(group.name);
             return (
               <div
