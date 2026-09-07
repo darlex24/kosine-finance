@@ -43,8 +43,21 @@ _scan_log: dict[str, list[float]] = defaultdict(list)
 SIGNED_URL_TTL = 60 * 60 * 24 * 7
 
 
+def _prune_scan_log(now: float) -> None:
+    """Drop users with nothing in the window.
+
+    Without this the dict keeps one entry per user that has ever scanned, for
+    the life of the process — a slow leak that grows with the user base.
+    """
+    stale = [uid for uid, hits in _scan_log.items() if not any(now - t < 3600 for t in hits)]
+    for uid in stale:
+        del _scan_log[uid]
+
+
 def _enforce_scan_quota(user_id: str) -> None:
     now = time.monotonic()
+    if len(_scan_log) > 1000:
+        _prune_scan_log(now)
     recent = [t for t in _scan_log[user_id] if now - t < 3600]
     if len(recent) >= SCANS_PER_HOUR:
         oldest = min(recent)

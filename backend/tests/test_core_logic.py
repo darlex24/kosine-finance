@@ -221,3 +221,67 @@ def test_empty_upload_is_rejected():
 def test_extension_comes_from_sniffed_type_not_the_filename():
     assert uploads.safe_extension("image/png") == "png"
     assert uploads.safe_extension("application/pdf") == "pdf"
+
+
+# ------------------------------------------------------------ cache bounds
+
+def test_fx_cache_evicts_and_stays_bounded(monkeypatch):
+    """The cache key includes the row's date, so an unbounded dict would grow
+    forever as historical rows are priced."""
+    monkeypatch.setattr(fx, "MAX_CACHE_ENTRIES", 50)
+    monkeypatch.setattr(fx, "_direct", lambda *_: Decimal("2"))
+    fx._cache.clear()
+
+    for day in range(200):
+        fx.get_rate(None, "USD", "CAD", date(2020, 1, 1) + __import__("datetime").timedelta(days=day))
+
+    assert len(fx._cache) <= 50
+    fx._cache.clear()
+
+
+def test_fx_cache_evicts_least_recently_used(monkeypatch):
+    monkeypatch.setattr(fx, "MAX_CACHE_ENTRIES", 3)
+    monkeypatch.setattr(fx, "_direct", lambda *_: Decimal("2"))
+    fx._cache.clear()
+    import datetime as dt
+
+    days = [date(2020, 1, 1) + dt.timedelta(days=i) for i in range(3)]
+    for d in days:
+        fx.get_rate(None, "USD", "CAD", d)
+
+    fx.get_rate(None, "USD", "CAD", days[0])          # touch the oldest
+    fx.get_rate(None, "USD", "CAD", date(2021, 6, 1))  # force one eviction
+
+    assert fx._key("USD", "CAD", days[0]) in fx._cache, "recently used entry was evicted"
+    assert fx._key("USD", "CAD", days[1]) not in fx._cache
+    fx._cache.clear()
+
+
+def test_scan_log_prunes_users_outside_the_window():
+    """Otherwise the dict keeps one entry per user who ever scanned, forever."""
+    from app.routers import ocr as ocr_router
+
+    ocr_router._scan_log.clear()
+    ocr_router._scan_log["stale-user"] = [0.0]           # far outside the hour
+    ocr_router._scan_log["recent-user"] = [1e9 - 10.0]   # inside it
+
+    ocr_router._prune_scan_log(1e9)
+
+    assert "stale-user" not in ocr_router._scan_log
+    assert "recent-user" in ocr_router._scan_log
+    ocr_router._scan_log.clear()
+
+
+def test_scan_quota_blocks_past_the_ceiling():
+    from app.routers import ocr as ocr_router
+
+    ocr_router._scan_log.clear()
+    for _ in range(ocr_router.SCANS_PER_HOUR):
+        ocr_router._enforce_scan_quota("u1")
+
+    with pytest.raises(HTTPException) as err:
+        ocr_router._enforce_scan_quota("u1")
+    assert err.value.status_code == 429
+
+    ocr_router._enforce_scan_quota("u2")  # per-user, not global
+    ocr_router._scan_log.clear()

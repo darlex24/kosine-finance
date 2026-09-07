@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import OrderedDict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -35,7 +36,13 @@ PIVOT = "USD"
 TODAY_TTL_SECONDS = 15 * 60
 
 # (base, quote, iso_date) -> (rate, cached_at)
-_cache: dict[tuple[str, str, str], tuple[Decimal, float]] = {}
+#
+# Bounded LRU rather than a plain dict: the key includes the row's date, so a
+# long-running process backfilling years of history across 60 currencies would
+# otherwise grow this without limit and never evict. 10k entries is far more
+# than any single request path touches.
+MAX_CACHE_ENTRIES = 10_000
+_cache: OrderedDict[tuple[str, str, str], tuple[Decimal, float]] = OrderedDict()
 
 
 def _key(base: str, quote: str, on: date) -> tuple[str, str, str]:
@@ -50,7 +57,15 @@ def _cached(key: tuple[str, str, str], on: date) -> Decimal | None:
     if on >= date.today() and time.time() - cached_at > TODAY_TTL_SECONDS:
         _cache.pop(key, None)
         return None
+    _cache.move_to_end(key)  # most recently used
     return rate
+
+
+def _remember(key: tuple[str, str, str], rate: Decimal) -> None:
+    _cache[key] = (rate, time.time())
+    _cache.move_to_end(key)
+    while len(_cache) > MAX_CACHE_ENTRIES:
+        _cache.popitem(last=False)  # evict least recently used
 
 
 def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
@@ -88,7 +103,7 @@ def get_rate(client: Client, base: str, quote: str, on: date) -> Decimal:
             )
             rate = Decimal(1)
 
-    _cache[key] = (rate, time.time())
+    _remember(key, rate)
     return rate
 
 
