@@ -124,3 +124,42 @@ enter). There is no automated test suite yet. The 2026 figures
 before filing, and confirm any charity's registration number in the CRA charities listing.
 
 Estimates only; not tax advice.
+
+## Going live
+
+The app is safe by default in development and needs these before it faces the public.
+
+**1. Set `CORS_ORIGINS` to the deployed frontend URL.** The API refuses to start on
+`*` — that is deliberate, so a misconfigured deploy fails at boot rather than
+serving a hole. Multiple origins are comma-separated.
+
+**2. Move secrets out of `.env` files** into the host's secret store. Nothing is
+committed today (verified against the full git history), but a file on disk is
+not where `SUPABASE_SERVICE_ROLE_KEY` belongs in production. That key bypasses
+RLS entirely.
+
+**3. Terminate TLS in front of both services** and keep them on HTTPS. `Strict-
+Transport-Security` is already sent by the frontend; it does nothing over plain
+HTTP.
+
+**4. Rate limits are per-process.** `services/ratelimit.py` uses an in-process
+store, so N workers means N times the configured limit. Call
+`ratelimit.configure_backend()` with a Redis-backed store before scaling beyond
+one worker, and assert `ratelimit.is_distributed()` at startup so the mistake is
+loud. The same applies to the OCR scan quota in `routers/ocr.py`.
+
+**5. Keep email confirmation on** in Supabase Auth. Signup is open, and
+confirmation is the only thing standing between an open signup form and
+unlimited accounts each holding an hourly OCR budget billed to you. Verified on
+this project: signup returns no session until the address is confirmed.
+
+**6. Schedule `POST /api/fx/refresh`** rather than relying on a user to trigger
+it. It is capped at four calls per user per hour; rates change daily.
+
+**7. Known accepted risk:** `npm audit` reports a `postcss` advisory reachable
+only through Next's own dependency tree. It affects CSS processing at build time,
+not the running server, and clearing it currently requires Next 16. Revisit when
+upgrading.
+
+**8. Back up the database.** Supabase's automatic backups depend on your plan.
+This holds financial records people may need for tax years after the fact.

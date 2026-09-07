@@ -37,10 +37,12 @@ ALLOWED_TYPES = uploads.ALLOWED_TYPES
 SCANS_PER_HOUR = 60
 _scan_log: dict[str, list[float]] = defaultdict(list)
 
-# Receipt links are bearer credentials: anyone holding one can read the object.
-# 7 days is long enough to view and re-view an entry, short enough that a leaked
-# URL stops working. Re-upload regenerates it.
-SIGNED_URL_TTL = 60 * 60 * 24 * 7
+# Receipt links are bearer credentials: anyone holding one reads the object,
+# with no session and no further check. A week was far longer than any legitimate
+# use — the link is followed moments after it is issued — and long enough for a
+# forwarded email or a screenshot to stay live. One hour, re-signed on demand by
+# GET /api/ledger/{id}/receipt-url.
+SIGNED_URL_TTL = 60 * 60
 
 
 def _prune_scan_log(now: float) -> None:
@@ -99,7 +101,7 @@ async def scan_document(
             "The OpenAI API key was rejected. Check OPENAI_API_KEY in backend/.env.",
         ) from exc
     except RateLimitError as exc:
-        detail = str(exc)
+        detail = str(exc)  # inspected locally only; never returned verbatim
         if "insufficient_quota" in detail or "credit" in detail.lower():
             message = (
                 "The OpenAI account has no credits remaining, so the receipt "
@@ -117,9 +119,12 @@ async def scan_document(
             "Reading the document timed out. Try a smaller or clearer image.",
         ) from exc
     except (APIConnectionError, APIError) as exc:
+        # Full detail to the log, none to the caller: provider errors quote
+        # request URLs and headers.
         logger.error("OpenAI call failed: %s", exc)
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Could not reach the OCR service: {exc}"
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not reach the document-reading service. Try again shortly.",
         ) from exc
     except (ValueError, KeyError, TypeError) as exc:
         # Malformed JSON back from the model, or a shape we did not expect.

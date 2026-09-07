@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
+from .services.ratelimit import write_limit_middleware
 from .routers import (
     assets,
     budget,
@@ -47,6 +48,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+app.middleware("http")(write_limit_middleware)
 
 app.include_router(core.router, prefix="/api", tags=["core"])
 app.include_router(giving.router, prefix="/api", tags=["giving"])

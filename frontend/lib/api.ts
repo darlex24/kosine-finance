@@ -130,6 +130,9 @@ export const api = {
     request<LedgerRow[]>("/api/ledger/bulk", { method: "POST", body: JSON.stringify(body) }),
   updateLedgerRow: (id: string, body: Partial<LedgerDraft>) =>
     request<LedgerRow>(`/api/ledger/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  // Receipt links expire in an hour, so the UI asks for a fresh one rather
+  // than relying on the URL stored with the row.
+  receiptUrl: (id: string) => request<{ url: string }>(`/api/ledger/${id}/receipt-url`),
   deleteLedgerRow: (id: string) =>
     request<void>(`/api/ledger/${id}`, { method: "DELETE" }),
   deleteLedgerRows: (ids: string[]) =>

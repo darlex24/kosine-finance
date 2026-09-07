@@ -27,7 +27,8 @@ from ..schemas import (
     ProfileIn,
     ProfileOut,
 )
-from ..services import fx
+from ..services import audit, fx
+from ..services.ratelimit import limit
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -93,15 +94,26 @@ def list_currencies(user: CurrentUser = Depends(get_current_user)):
 @router.post("/fx/refresh", response_model=FxRefreshOut)
 async def refresh_fx(
     on: date | None = None,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(limit("fx_refresh", 4, "rate refreshes")),
     service: Client = Depends(get_service_client),
 ):
-    """Pull the day's ECB reference rates. Safe to call repeatedly — it upserts."""
+    """Pull the day's ECB reference rates. Safe to call repeatedly — it upserts.
+
+    Rates are global, not per-user, so one refresh serves everybody and there is
+    no reason for any account to call it often. It also writes with the
+    service-role client and makes an outbound request, so leaving it uncapped
+    handed every signed-in user a privileged, unmetered egress endpoint. Four an
+    hour is far more than the daily cadence the data actually changes at.
+    """
     try:
         return await fx.refresh_rates(service, base="USD", on=on)
     except Exception as exc:  # noqa: BLE001 - upstream outage shouldn't 500 opaquely
+        # Logged in full, reported in outline: upstream errors can carry internal
+        # URLs and query strings, and those must not reach a browser.
+        logger.error("FX provider failed: %s", exc)
         raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Rate provider unavailable: {exc}"
+            status.HTTP_502_BAD_GATEWAY,
+            "The exchange-rate provider is unavailable. Try again shortly.",
         ) from exc
 
 
@@ -214,6 +226,19 @@ def delete_account(
     # net_worth_snapshots, monthly_budgets, budget_allocations, and the user's
     # own categories, platforms and giving arms. Seeded reference data is
     # untouched by design.
+    # Logged before the cascade, while the row still exists to reference. The
+    # entry survives it: audit_log.user_id is ON DELETE SET NULL, so the one
+    # event most worth auditing does not erase itself.
+    audit.record(
+        service,
+        user_id=user.id,
+        actor_email=user.email,
+        action="account.delete",
+        entity="account",
+        entity_count=1,
+        detail={"receipts_removed": len(paths)},
+    )
+
     try:
         service.auth.admin.delete_user(user.id)
     except Exception as exc:  # noqa: BLE001

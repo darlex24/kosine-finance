@@ -19,7 +19,10 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from ..deps import CurrentUser, get_current_user
+from ..deps import CurrentUser, get_current_user, get_service_client
+from supabase import Client
+
+from ..services import audit
 from ..schemas import (
     BulkDeleteIn,
     LedgerEntryType,
@@ -310,6 +313,51 @@ def delete_ledger_row(row_id: str, user: CurrentUser = Depends(get_current_user)
 
 
 @router.post("/ledger/bulk-delete", status_code=204)
-def delete_ledger_rows(payload: BulkDeleteIn, user: CurrentUser = Depends(get_current_user)):
-    if payload.ids:
-        user.client.table("transactions").delete().in_("id", payload.ids).execute()
+def delete_ledger_rows(
+    payload: BulkDeleteIn,
+    user: CurrentUser = Depends(get_current_user),
+    service: Client = Depends(get_service_client),
+):
+    if not payload.ids:
+        return
+    user.client.table("transactions").delete().in_("id", payload.ids).execute()
+    # How many and when, not what: the rows were just deleted on purpose.
+    audit.record(
+        service,
+        user_id=user.id,
+        actor_email=user.email,
+        action="ledger.bulk_delete",
+        entity="transaction",
+        entity_count=len(payload.ids),
+    )
+
+
+@router.get("/ledger/{row_id}/receipt-url")
+def receipt_url(
+    row_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    service: Client = Depends(get_service_client),
+):
+    """A fresh signed link for this row's receipt.
+
+    Links expire in an hour, so they cannot be stored and re-shared. The row is
+    read through the caller's own client first, so RLS decides whether they may
+    see it — the service role is used only to sign, after ownership is settled.
+    """
+    from ..config import get_settings
+
+    row = _fetch_row(user, row_id)
+    path = row.get("receipt_storage_path")
+    if not path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No receipt on this entry")
+
+    settings = get_settings()
+    try:
+        signed = service.storage.from_(settings.supabase_receipt_bucket).create_signed_url(
+            path, 60 * 60
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "Could not produce a receipt link."
+        ) from exc
+    return {"url": signed.get("signedURL") or signed.get("signedUrl")}
